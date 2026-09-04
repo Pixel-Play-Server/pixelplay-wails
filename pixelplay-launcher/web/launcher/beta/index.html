@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pixel Play — Beta testers</title>
+  <meta name="description" content="Builds beta del launcher Pixel Play: Linux, Windows y macOS." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Pixelify+Sans:wght@500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #050705;
+      --green: #22c55e;
+      --bright: #4ade80;
+      --deep: #15803d;
+      --text: #f4f4f5;
+      --muted: #a1a1aa;
+      --amber: #fbbf24;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { min-height: 100%; }
+    body {
+      font-family: Outfit, ui-sans-serif, system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      overflow-x: hidden;
+    }
+    .grid {
+      position: fixed; inset: 0; pointer-events: none;
+      background-image:
+        linear-gradient(rgba(34,197,94,.07) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(34,197,94,.07) 1px, transparent 1px);
+      background-size: 48px 48px;
+      mask-image: radial-gradient(ellipse at 50% 20%, #000 20%, transparent 75%);
+    }
+    .glow {
+      position: fixed; width: 520px; height: 520px; border-radius: 50%;
+      background: radial-gradient(circle, rgba(251,191,36,.18), transparent 70%);
+      top: -160px; left: 50%; transform: translateX(-50%);
+      pointer-events: none; filter: blur(8px);
+    }
+    header {
+      position: relative; z-index: 2;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 22px 8vw;
+    }
+    .brand {
+      font-family: "Pixelify Sans", sans-serif;
+      font-size: 1.6rem; letter-spacing: .04em;
+      color: inherit; text-decoration: none;
+    }
+    .brand span { color: var(--green); }
+    nav a {
+      color: var(--muted); text-decoration: none; margin-left: 22px; font-weight: 500;
+    }
+    nav a:hover { color: #fff; }
+    .hero {
+      position: relative; z-index: 2;
+      padding: 6vh 8vw 4vh;
+      max-width: 1100px;
+    }
+    .pill {
+      display: inline-block;
+      border: 1px solid rgba(251,191,36,.45);
+      background: rgba(251,191,36,.12);
+      color: var(--amber);
+      font-size: .82rem;
+      padding: 6px 12px;
+      border-radius: 999px;
+      margin-bottom: 18px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    h1 {
+      font-family: "Pixelify Sans", sans-serif;
+      font-size: clamp(2.4rem, 7vw, 4.6rem);
+      line-height: .95;
+      margin-bottom: 18px;
+    }
+    h1 em { font-style: normal; color: var(--amber); }
+    .lead {
+      font-size: 1.15rem;
+      color: var(--muted);
+      max-width: 620px;
+      line-height: 1.55;
+      margin-bottom: 28px;
+    }
+    .downloads {
+      position: relative; z-index: 2;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 18px;
+      padding: 0 8vw 4vh;
+    }
+    .card {
+      background: rgba(12,16,14,.86);
+      border: 1px solid rgba(255,255,255,.1);
+      padding: 22px 20px 24px;
+    }
+    .card h3 {
+      font-family: "Pixelify Sans", sans-serif;
+      font-size: 1.35rem;
+      margin-bottom: 8px;
+      color: var(--bright);
+    }
+    .card p { color: var(--muted); line-height: 1.5; font-size: .95rem; margin-bottom: 16px; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-family: "Pixelify Sans", sans-serif;
+      font-size: 1.05rem;
+      padding: 12px 18px;
+      text-decoration: none;
+      border: 2px solid var(--green);
+      color: #04120a;
+      background: var(--green);
+      box-shadow: 0 4px 0 #166534;
+    }
+    .btn:hover { filter: brightness(1.08); }
+    .btn.ghost {
+      background: transparent;
+      color: #fff;
+      box-shadow: 0 4px 0 rgba(0,0,0,.4);
+    }
+    .btn[aria-disabled="true"] {
+      opacity: .55;
+      pointer-events: none;
+      box-shadow: none;
+    }
+    .how {
+      position: relative; z-index: 2;
+      padding: 2vh 8vw 10vh;
+      max-width: 760px;
+    }
+    .how h2 {
+      font-family: "Pixelify Sans", sans-serif;
+      font-size: 1.6rem;
+      margin-bottom: 12px;
+      color: var(--amber);
+    }
+    .how ol { color: var(--muted); padding-left: 1.2rem; line-height: 1.7; }
+    .how code {
+      font-size: .9em;
+      background: rgba(255,255,255,.06);
+      padding: 1px 6px;
+    }
+    footer {
+      position: relative; z-index: 2;
+      padding: 24px 8vw 40px;
+      color: var(--muted);
+      font-size: .9rem;
+      border-top: 1px solid rgba(255,255,255,.06);
+    }
+    footer a { color: var(--bright); }
+  </style>
+</head>
+<body>
+  <div class="grid"></div>
+  <div class="glow"></div>
+  <header>
+    <a class="brand" href="/">PIXEL <span>PLAY</span></a>
+    <nav>
+      <a href="/">estable</a>
+      <a href="https://www.pixelplay.gg">server</a>
+    </nav>
+  </header>
+  <section class="hero">
+    <div class="pill">Canal beta · v5.0.3</div>
+    <h1>Programa de <em>beta testers</em>.</h1>
+    <p class="lead">
+      Builds nuevas antes que el canal estable. Pueden romper, el updater vive en otro árbol
+      y no te saca de la 5.0.2 estable si no las instalás vos.
+    </p>
+  </section>
+  <section class="downloads">
+    <article class="card">
+      <h3>Linux</h3>
+      <p>x86_64, WebKitGTK. Binario directo, sin installer.</p>
+      <a class="btn" href="/dl/beta/pixelplay-launcher">Descargar Linux</a>
+    </article>
+    <article class="card">
+      <h3>Windows</h3>
+      <p>Windows 10/11 64-bit. Pedí WebView2 si Windows no lo trae.</p>
+      <a class="btn" href="/dl/beta/pixelplay-launcher.exe">Descargar Windows</a>
+    </article>
+    <article class="card">
+      <h3>macOS</h3>
+      <p>Apple Silicon y Intel se compilan en GitHub Actions. Cuando hay build, sale acá y en Releases.</p>
+      <a class="btn ghost" id="mac-btn" href="https://github.com/Pixel-Play-Server/pixelplay-wails/releases">Ver builds Mac</a>
+    </article>
+  </section>
+  <section class="how">
+    <h2>Cómo entrar al canal</h2>
+    <ol>
+      <li>Bajá el binario de tu sistema (arriba). En Linux: <code>chmod +x</code> y ejecutalo.</li>
+      <li>En el launcher: Ajustes → activá <strong>Actualizaciones Beta</strong>.</li>
+      <li>Las próximas 5.0.x beta llegan solas. El canal estable sigue en 5.0.2 hasta que lo promovamos.</li>
+      <li>En macOS, la primera vez: clic derecho → Abrir (no está firmado por Apple todavía).</li>
+    </ol>
+  </section>
+  <footer>
+    Pixel Play beta — <a href="/">volver al launcher estable</a>
+  </footer>
+</body>
+</html>

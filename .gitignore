@@ -1,0 +1,11 @@
+pixelmodpack/
+pixelmodpack-mcp/
+pixelplay-api/
+pixelplay-web/
+**/node_modules/
+**/.DS_Store
+pixelplay-launcher/frontend/dist/
+pixelplay-launcher/frontend/src
+pixelplay-launcher/frontend/public
+pixelplay-launcher/build/bin/
+**/*.exe

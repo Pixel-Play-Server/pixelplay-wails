@@ -1,0 +1,91 @@
+name: macOS beta
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    name: Build Wails macOS
+    runs-on: macos-14
+    steps:
+      - name: Checkout launcher
+        uses: actions/checkout@v4
+
+      - name: Checkout frontend (shared UI)
+        uses: actions/checkout@v4
+        with:
+          repository: Pixel-Play-Server/pixelplaylauncher
+          path: _ui
+
+      - name: Link frontend src
+        run: |
+          rm -f pixelplay-launcher/frontend/src pixelplay-launcher/frontend/public
+          ln -s "$GITHUB_WORKSPACE/_ui/src" pixelplay-launcher/frontend/src
+          ln -s "$GITHUB_WORKSPACE/_ui/public" pixelplay-launcher/frontend/public
+          test -f pixelplay-launcher/frontend/src/App.tsx
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: pixelplay-launcher/go.mod
+          cache-dependency-path: pixelplay-launcher/go.sum
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: pixelplay-launcher/frontend/package-lock.json
+
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.15.0
+
+      - name: Frontend deps
+        run: npm ci
+        working-directory: pixelplay-launcher/frontend
+
+      - name: Build darwin/arm64
+        working-directory: pixelplay-launcher
+        env:
+          CGO_ENABLED: "1"
+        run: |
+          wails build -platform darwin/arm64 -s \
+            -ldflags "-X pixelplay-launcher/internal/updater.DefaultChannel=beta"
+
+      - name: Package zip
+        id: pkg
+        run: |
+          VER=$(grep 'const App' pixelplay-launcher/internal/version/version.go | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+          APP="pixelplay-launcher/build/bin/pixelplay-launcher.app"
+          test -d "$APP"
+          mkdir -p dist
+          ZIP="dist/PixelPlay-${VER}-mac-arm64.zip"
+          ditto -c -k --keepParent "$APP" "$ZIP"
+          ls -lh "$ZIP"
+          echo "ver=$VER" >> "$GITHUB_OUTPUT"
+          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pixelplay-macos-arm64
+          path: dist/*.zip
+          if-no-files-found: error
+
+      - name: GitHub prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.pkg.outputs.ver }}-beta
+          name: Pixel Play ${{ steps.pkg.outputs.ver }} beta (macOS)
+          prerelease: true
+          files: dist/*.zip
+          body: |
+            Build macOS Apple Silicon del launcher Wails 5.0 (canal beta).
+            Primera vez: clic derecho en la app → Abrir.
+            Linux y Windows: https://launcher.pixelplay.gg/beta/

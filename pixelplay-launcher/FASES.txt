@@ -1,0 +1,32 @@
+# Pixel Play Wails/Go — fases
+
+Contrato: mismo data dir ~/.local/share/pixelplayclientv3
+Frontend React: symlink pixelplaylauncher/src (News ya quitado ahí).
+
+Portado en Go ahora:
+- profiles CRUD / packs / config / protect / osopen
+- Invoke bridge Tauri-compatible
+- Updater → https://panel.pixelplay.gg/dl (check + download) + push notify + popup UI
+- Discord RPC rico (idle/modal/launching/installing/ingame)
+- News command → [] (feature removida)
+- Events updater_status vía Wails runtime
+- accounts.json (list/active/set/remove/offline) + MSA device-code (Xbox/XSTS/Minecraft)
+- launch real: Java Temurin + Mojang (libs/natives/assets/client) + vanilla/fabric/quilt/forge/neoforge
+- procesos Minecraft + eventos snake_case + abort/kill
+- get_local_content (scan + hashes + protect) + enable/disable/delete archivos
+- Modrinth API (search/versions/projects/hashes/tags/updates) + download/update a perfil
+- Capes API (browse/player/equip/unequip/delete/favorite/upload)
+- mundos/servidores (list/copy/delete/lock + ping)
+- skins locales + upload/reset MSA + Starlight render
+- .desktop Go + scripts/build-and-desktop.sh / install-desktop.sh
+- Aqua glass en botones + shell negro (no gris)
+- Frameless (sin chrome GNOME) + drag en header Pixel Play
+- .ppack: import (zip + extract), policy, updater, mods al Play, resource/shader packs default
+- App hermana: pixelmodpack (editor .ppack)
+
+Pendiente (no bloquea Play):
+1) OAuth MSA en ventana embebida (hoy device code)
+2) capas vanilla Mojang / Discord account link
+3) apply/relaunch updater instalado
+4) .mrpack directo (usar Studio o convertir a .ppack)
+5) publish automático a panel.pixelplay.gg/dl/pixelplay/modpacks/{id}/
