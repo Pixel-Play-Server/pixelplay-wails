@@ -24,7 +24,7 @@ var DefaultChannel = "stable"
 var PrivateBuild = ""
 
 // AppVersion is kept for smoke tools; prefer version.App in production paths.
-const AppVersion = "6.0.5"
+const AppVersion = "6.0.6"
 
 // StatusEvent matches the Tauri updater_status payload shape.
 type StatusEvent struct {
