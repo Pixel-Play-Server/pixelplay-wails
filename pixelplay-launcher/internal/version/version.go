@@ -1,4 +1,4 @@
 package version
 
 // App is the shared launcher version string for Go/Wails builds.
-var App = "6.0.3"
+var App = "6.0.4"

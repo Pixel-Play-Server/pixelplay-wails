@@ -1,6 +1,7 @@
 package ipc
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -118,6 +119,66 @@ func Dispatch(rt *Runtime, cmd string, argsJSON string) (any, error) {
 		}
 		return out, nil
 
+	case "list_horizon_registry_mods":
+		return horizon.RegistryMods(context.Background())
+	case "install_horizon_registry_mod":
+		id, err := argString(args, "profileId", "profile_id")
+		if err != nil {
+			return nil, err
+		}
+		mod, err := argString(args, "modId", "mod_id")
+		if err != nil {
+			return nil, err
+		}
+		raw, err := profiles.RawGet(id)
+		if err != nil {
+			return nil, err
+		}
+		var p struct {
+			Path    string `json:"path"`
+			Horizon bool   `json:"horizon_runtime"`
+		}
+		if err = json.Unmarshal(raw, &p); err != nil {
+			return nil, err
+		}
+		if !p.Horizon || p.Path == "" || !filepath.IsLocal(p.Path) {
+			return nil, fmt.Errorf("perfil Horizon inválido")
+		}
+		return horizon.InstallRegistryMod(context.Background(), paths.ProfileDir(p.Path), mod)
+	case "list_profile_screenshots":
+		id, err := argString(args, "profileId", "profile_id")
+		if err != nil {
+			return nil, err
+		}
+		p, err := profiles.Get(id)
+		if err != nil {
+			return nil, err
+		}
+		dir := filepath.Join(paths.ProfileDir(p.Path), "screenshots")
+		items, err := os.ReadDir(dir)
+		if os.IsNotExist(err) {
+			return []map[string]any{}, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		out := []map[string]any{}
+		for _, item := range items {
+			if !item.Type().IsRegular() {
+				continue
+			}
+			name := item.Name()
+			low := strings.ToLower(name)
+			if !strings.HasSuffix(low, ".png") && !strings.HasSuffix(low, ".jpg") && !strings.HasSuffix(low, ".jpeg") {
+				continue
+			}
+			stat, e := item.Info()
+			if e != nil {
+				continue
+			}
+			out = append(out, map[string]any{"filename": name, "path": filepath.Join(dir, name), "modified": stat.ModTime().UTC().Format(time.RFC3339)})
+		}
+		return out, nil
 	case "install_horizon_mod":
 		id, err := argString(args, "profileId", "profile_id")
 		if err != nil {
