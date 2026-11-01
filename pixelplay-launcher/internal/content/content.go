@@ -75,7 +75,8 @@ func ListLocal(profileID, contentType string, calculateHashes bool) ([]Item, err
 		return nil, err
 	}
 	var meta struct {
-		Path string `json:"path"`
+		Path           string `json:"path"`
+		HorizonRuntime bool   `json:"horizon_runtime"`
 	}
 	if err := json.Unmarshal(raw, &meta); err != nil {
 		return nil, err
@@ -88,6 +89,10 @@ func ListLocal(profileID, contentType string, calculateHashes bool) ([]Item, err
 
 	root := paths.ProfileDir(meta.Path)
 	sub := dirForType(contentType)
+	horizonMods := meta.HorizonRuntime && (strings.EqualFold(contentType, "Mod") || strings.EqualFold(contentType, "Mods"))
+	if horizonMods {
+		sub = "horizon-mods"
+	}
 	dir := filepath.Join(root, sub)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -100,6 +105,9 @@ func ListLocal(profileID, contentType string, calculateHashes bool) ([]Item, err
 	norm := normalizeType(contentType)
 	for _, e := range entries {
 		name := e.Name()
+		if horizonMods && !strings.HasSuffix(strings.ToLower(strings.TrimSuffix(name, ".disabled")), ".hmod") {
+			continue
+		}
 		if name == "." || name == ".." {
 			continue
 		}
