@@ -14,6 +14,10 @@ import (
 // ErrAuthorProtected is returned when a filesystem/UI action is blocked.
 var ErrAuthorProtected = fmt.Errorf("author protection: action blocked for this pack")
 
+func blocked(msg string) error {
+	return fmt.Errorf("%w: %s", ErrAuthorProtected, msg)
+}
+
 // ProfileProtected reports whether the profile's selected pack locks mods.
 func ProfileProtected(profileID string) (bool, error) {
 	p, err := profiles.Get(profileID)
@@ -26,6 +30,21 @@ func ProfileProtected(profileID string) (bool, error) {
 	return packs.IsProtectedByAuthor(*p.SelectedPixelplayPackID)
 }
 
+func folderOpenAllowed(packID string) (bool, error) {
+	pol, err := packs.PolicyFor(packID)
+	if err != nil {
+		return false, err
+	}
+	if pol != nil && pol.AllowOpenFolder {
+		return true, nil
+	}
+	ok, err := packs.IsProtectedByAuthor(packID)
+	if err != nil {
+		return false, err
+	}
+	return !ok, nil
+}
+
 // AssertProfileFolderOpenable blocks opening the whole profile dir when protected.
 func AssertProfileFolderOpenable(profileID string) error {
 	p, err := profiles.Get(profileID)
@@ -35,31 +54,42 @@ func AssertProfileFolderOpenable(profileID string) error {
 	if p.SelectedPixelplayPackID == nil || *p.SelectedPixelplayPackID == "" {
 		return nil
 	}
-	pol, err := packs.PolicyFor(*p.SelectedPixelplayPackID)
+	ok, err := folderOpenAllowed(*p.SelectedPixelplayPackID)
 	if err != nil {
 		return err
 	}
-	if pol != nil && pol.AllowOpenFolder {
-		return nil
-	}
-	ok, err := packs.IsProtectedByAuthor(*p.SelectedPixelplayPackID)
-	if err != nil {
-		return err
-	}
-	if ok {
-		return fmt.Errorf("%w: cannot open profile folder", ErrAuthorProtected)
+	if !ok {
+		return blocked("cannot open profile folder")
 	}
 	return nil
 }
 
-// AssertPathOpenable blocks revealing paths under a protected profile's mods/.
+func under(candidate, root string) bool {
+	if root == "" {
+		return false
+	}
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		root = resolved
+	} else {
+		root, _ = filepath.Abs(root)
+	}
+	if resolved, err := filepath.EvalSymlinks(candidate); err == nil {
+		candidate = resolved
+	}
+	root = filepath.Clean(root)
+	candidate = filepath.Clean(candidate)
+	if candidate == root {
+		return true
+	}
+	sep := string(os.PathSeparator)
+	return strings.HasPrefix(candidate, root+sep)
+}
+
+// AssertPathOpenable blocks revealing any path that belongs to a protected client.
 func AssertPathOpenable(absOrRel string) error {
 	candidate, err := filepath.Abs(absOrRel)
 	if err != nil {
 		candidate = absOrRel
-	}
-	if resolved, err := filepath.EvalSymlinks(candidate); err == nil {
-		candidate = resolved
 	}
 
 	all, err := profiles.List()
@@ -70,19 +100,25 @@ func AssertPathOpenable(absOrRel string) error {
 		if p.SelectedPixelplayPackID == nil || *p.SelectedPixelplayPackID == "" {
 			continue
 		}
-		protected, err := packs.IsProtectedByAuthor(*p.SelectedPixelplayPackID)
-		if err != nil || !protected {
+		allowed, err := folderOpenAllowed(*p.SelectedPixelplayPackID)
+		if err != nil || allowed {
 			continue
 		}
-		modsDir := filepath.Join(paths.ProfileDir(p.Path), "mods")
-		if resolved, err := filepath.EvalSymlinks(modsDir); err == nil {
-			modsDir = resolved
-		} else {
-			modsDir, _ = filepath.Abs(modsDir)
+		if under(candidate, paths.ProfileDir(p.Path)) {
+			return blocked("client folder access is blocked")
 		}
-		if candidate == modsDir || strings.HasPrefix(candidate, modsDir+string(os.PathSeparator)) {
-			return fmt.Errorf("%w: mods folder access is blocked", ErrAuthorProtected)
+		if under(candidate, paths.ProtectedPackDir(*p.SelectedPixelplayPackID)) {
+			return blocked("protected pack storage is blocked")
 		}
+		if under(candidate, paths.VaultDir(*p.SelectedPixelplayPackID)) {
+			return blocked("protected vault is blocked")
+		}
+		if under(candidate, filepath.Join(paths.DataDir(), "ppacks", *p.SelectedPixelplayPackID)) {
+			return blocked("pack files access is blocked")
+		}
+	}
+	if under(candidate, paths.ProtectedRoot()) {
+		return blocked("protected storage is blocked")
 	}
 	return nil
 }

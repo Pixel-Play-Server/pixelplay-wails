@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"pixelplay-launcher/internal/paths"
+	"pixelplay-launcher/internal/ranks"
 )
 
 var mu sync.Mutex
@@ -32,6 +33,8 @@ type Credentials struct {
 	RefreshToken         string               `json:"refresh_token"`
 	Expires              string               `json:"expires"`
 	PixelplayCredentials PixelplayCredentials `json:"pixelplay_credentials"`
+	Kind                 string               `json:"kind,omitempty"`
+	Rank                 string               `json:"rank,omitempty"`
 	Active               bool                 `json:"active"`
 }
 
@@ -87,6 +90,43 @@ func (c Credentials) Offline() bool {
 	return strings.TrimSpace(c.AccessToken) == ""
 }
 
+func (c Credentials) PixelPasswordAccount() bool {
+	if !c.Offline() {
+		return false
+	}
+	kind := strings.ToLower(strings.TrimSpace(c.Kind))
+	return kind == "pixel" || kind == "cracked" || c.PixelToken() != ""
+}
+
+func (c Credentials) PixelAccount() bool {
+	if c.PixelToken() != "" {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(c.Kind)) {
+	case "pixel", "cracked", "premium":
+		return true
+	default:
+		return false
+	}
+}
+
+func RankMeta(rank string) (label, color string) {
+	if strings.TrimSpace(rank) == "" {
+		return "", ""
+	}
+	return ranks.Meta(rank)
+}
+
+func (c Credentials) PixelToken() string {
+	if c.PixelplayCredentials.Production != nil {
+		return strings.TrimSpace(c.PixelplayCredentials.Production.Value)
+	}
+	if c.PixelplayCredentials.Experimental != nil {
+		return strings.TrimSpace(c.PixelplayCredentials.Experimental.Value)
+	}
+	return ""
+}
+
 func canonUUID(id string) string {
 	return strings.ToLower(strings.ReplaceAll(strings.TrimSpace(id), "-", ""))
 }
@@ -112,6 +152,24 @@ func matchAccount(a Credentials, id string) bool {
 // ForUI is the shape the React store expects (minecraft_username + expires_at aliases).
 func (c Credentials) ForUI() map[string]any {
 	name := c.Username
+	rank := strings.TrimSpace(c.Rank)
+	kind := strings.TrimSpace(c.Kind)
+	if rank == "" && c.PixelAccount() {
+		rank = "usuario"
+	}
+	if kind == "" && c.PixelPasswordAccount() {
+		kind = "pixel"
+	}
+	if kind == "" && c.PixelAccount() && !c.Offline() {
+		kind = "premium"
+	}
+	if kind == "" && !c.Offline() {
+		kind = "microsoft"
+	}
+	if kind == "" {
+		kind = "offline"
+	}
+	label, color := RankMeta(rank)
 	return map[string]any{
 		"id":                    c.ID,
 		"username":              name,
@@ -122,6 +180,11 @@ func (c Credentials) ForUI() map[string]any {
 		"expires":               c.Expires,
 		"expires_at":            c.Expires,
 		"offline":               c.Offline(),
+		"kind":                  kind,
+		"rank":                  rank,
+		"rank_label":            label,
+		"rank_color":            color,
+		"pixel_account":         c.PixelAccount(),
 		"pixelplay_credentials": c.PixelplayCredentials,
 	}
 }
@@ -315,4 +378,31 @@ func CreateOffline(username string, idOpt string) (Credentials, error) {
 		return Credentials{}, err
 	}
 	return creds, nil
+}
+
+func CreatePixel(username, id, token, rank, kind string) (Credentials, error) {
+	username = strings.TrimSpace(username)
+	id = strings.TrimSpace(id)
+	if username == "" || id == "" {
+		return Credentials{}, fmt.Errorf("cuenta Pixel incompleta")
+	}
+	if strings.TrimSpace(token) == "" {
+		return Credentials{}, fmt.Errorf("la API no devolvió token Pixel")
+	}
+	if kind == "" {
+		kind = "pixel"
+	}
+	return Upsert(Credentials{
+		ID:           id,
+		Username:     username,
+		AccessToken:  "",
+		RefreshToken: "",
+		Expires:      time.Now().UTC().AddDate(10, 0, 0).Format(time.RFC3339Nano),
+		Kind:         kind,
+		Rank:         rank,
+		PixelplayCredentials: PixelplayCredentials{
+			Production: &Token{Value: token},
+		},
+		Active: true,
+	})
 }

@@ -2,6 +2,7 @@ package java
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"compress/gzip"
 	"fmt"
 	"io"
@@ -67,10 +68,24 @@ func pickJava(cands []javaCand, required int) (string, bool) {
 // too-new install exists (e.g. JDK 25 when the game needs 21), it downloads
 // Temurin for the required major instead.
 func Ensure(required int, emit func(string)) (string, error) {
+	return ensureRange(required, maxCompatibleMajor(required), emit)
+}
+
+// EnsureExact is for runtimes such as Genesis that prescribe a JVM major.
+func EnsureExact(required int, emit func(string)) (string, error) {
+	return ensureRange(required, required, emit)
+}
+
+func MatchesMajor(bin string, required int) bool {
+	major, err := versionOf(bin)
+	return err == nil && major == required
+}
+
+func ensureRange(required, max int, emit func(string)) (string, error) {
 	if emit != nil {
 		emit(fmt.Sprintf("Buscando Java %d…", required))
 	}
-	if p, ok := findExisting(required); ok {
+	if p, ok := findExistingRange(required, max); ok {
 		if emit != nil {
 			if major, err := versionOf(p); err == nil {
 				emit(fmt.Sprintf("Usando Java %d", major))
@@ -84,7 +99,7 @@ func Ensure(required int, emit func(string)) (string, error) {
 	if err := downloadTemurin(required); err != nil {
 		return "", err
 	}
-	if p, ok := findExisting(required); ok {
+	if p, ok := findExistingRange(required, max); ok {
 		return p, nil
 	}
 	return "", fmt.Errorf("Java %d no quedó instalado", required)
@@ -112,6 +127,10 @@ func Validate(bin string) bool {
 }
 
 func findExisting(required int) (string, bool) {
+	return findExistingRange(required, maxCompatibleMajor(required))
+}
+
+func findExistingRange(required, max int) (string, bool) {
 	candidates := []string{}
 	_ = filepath.Walk(MetaJavaDir(), func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
@@ -125,12 +144,19 @@ func findExisting(required int) (string, bool) {
 		return nil
 	})
 	if home := os.Getenv("JAVA_HOME"); home != "" {
+		if runtime.GOOS == "windows" {
+			candidates = append(candidates, filepath.Join(home, "bin", "java.exe"))
+		}
 		candidates = append(candidates, filepath.Join(home, "bin", "java"))
 	}
 	if p, err := exec.LookPath("java"); err == nil {
 		candidates = append(candidates, p)
 	}
-	max := maxCompatibleMajor(required)
+	if runtime.GOOS == "windows" {
+		if p, err := exec.LookPath("java.exe"); err == nil {
+			candidates = append(candidates, p)
+		}
+	}
 	var ok []javaCand
 	seen := map[string]bool{}
 	for _, c := range candidates {
@@ -147,6 +173,27 @@ func findExisting(required int) (string, bool) {
 		}
 	}
 	return pickJava(ok, required)
+}
+
+// ForGameLaunch prefers javaw.exe on Windows so Minecraft/Lunar does not open a
+// fullscreen console window (java.exe is a console subsystem binary).
+func ForGameLaunch(bin string) string {
+	bin = strings.TrimSpace(bin)
+	if bin == "" || runtime.GOOS != "windows" {
+		return bin
+	}
+	base := strings.ToLower(filepath.Base(bin))
+	if base == "javaw.exe" || base == "javaw" {
+		return bin
+	}
+	dir := filepath.Dir(bin)
+	for _, name := range []string{"javaw.exe", "javaw"} {
+		cand := filepath.Join(dir, name)
+		if st, err := os.Stat(cand); err == nil && !st.IsDir() {
+			return cand
+		}
+	}
+	return bin
 }
 
 var verRe = regexp.MustCompile(`version "([0-9]+)`)
@@ -184,7 +231,12 @@ func downloadTemurin(major int) error {
 	)
 	destDir := filepath.Join(MetaJavaDir(), fmt.Sprintf("jdk-%d", major))
 	_ = os.RemoveAll(destDir)
-	archive := destDir + ".tgz"
+	// Windows Adoptium = .zip; Linux/macOS = .tar.gz. Sniff magic after download too.
+	ext := ".tar.gz"
+	if runtime.GOOS == "windows" {
+		ext = ".zip"
+	}
+	archive := destDir + ext
 	if err := download.File(url, archive, nil); err != nil {
 		return err
 	}
@@ -192,7 +244,81 @@ func downloadTemurin(major int) error {
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return err
 	}
-	return extractTarGz(archive, destDir)
+	return extractJDKArchive(archive, destDir)
+}
+
+func extractJDKArchive(src, dest string) error {
+	f, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	var magic [4]byte
+	n, _ := io.ReadFull(f, magic[:])
+	_, _ = f.Seek(0, io.SeekStart)
+	f.Close()
+	if n >= 2 && magic[0] == 'P' && magic[1] == 'K' {
+		return extractZip(src, dest)
+	}
+	if n >= 2 && magic[0] == 0x1f && magic[1] == 0x8b {
+		return extractTarGz(src, dest)
+	}
+	// Fallback by extension / OS.
+	low := strings.ToLower(src)
+	if strings.HasSuffix(low, ".zip") || runtime.GOOS == "windows" {
+		return extractZip(src, dest)
+	}
+	return extractTarGz(src, dest)
+}
+
+func extractZip(src, dest string) error {
+	zr, err := zip.OpenReader(src)
+	if err != nil {
+		return fmt.Errorf("abrir jdk zip: %w", err)
+	}
+	defer zr.Close()
+	var top string
+	for _, f := range zr.File {
+		name := filepath.ToSlash(f.Name)
+		if top == "" {
+			parts := strings.SplitN(name, "/", 2)
+			top = parts[0]
+		}
+		rel := strings.TrimPrefix(name, top+"/")
+		if rel == name {
+			rel = name
+		}
+		if rel == "" {
+			continue
+		}
+		target := filepath.Join(dest, filepath.FromSlash(rel))
+		if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(dest)+string(os.PathSeparator)) &&
+			filepath.Clean(target) != filepath.Clean(dest) {
+			return fmt.Errorf("path traversal en jdk zip")
+		}
+		if f.FileInfo().IsDir() {
+			_ = os.MkdirAll(target, 0o755)
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return err
+		}
+		out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, f.Mode())
+		if err != nil {
+			rc.Close()
+			return err
+		}
+		_, err = io.Copy(out, rc)
+		out.Close()
+		rc.Close()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func extractTarGz(src, dest string) error {
@@ -203,7 +329,7 @@ func extractTarGz(src, dest string) error {
 	defer f.Close()
 	gz, err := gzip.NewReader(f)
 	if err != nil {
-		return err
+		return fmt.Errorf("gzip jdk (¿archivo zip en Windows?): %w", err)
 	}
 	defer gz.Close()
 	tr := tar.NewReader(gz)

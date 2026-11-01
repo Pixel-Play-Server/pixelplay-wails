@@ -25,16 +25,23 @@ type Metadata struct {
 }
 
 var (
-	mu    sync.Mutex
-	procs = map[string]*entry{}
+	mu      sync.Mutex
+	procs   = map[string]*entry{}
+	stopped = map[string]bool{}
 )
 
 type entry struct {
 	meta Metadata
 	proc *os.Process
+	stop func() error
 }
 
 func Add(p *os.Process, meta Metadata) {
+	AddWithStop(p, meta, nil)
+}
+
+// AddWithStop lets native launchers terminate their owned child processes too.
+func AddWithStop(p *os.Process, meta Metadata, stop func() error) {
 	if meta.ID == "" {
 		meta.ID = uuid.NewString()
 	}
@@ -47,7 +54,7 @@ func Add(p *os.Process, meta Metadata) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	procs[meta.ProfileID] = &entry{meta: meta, proc: p}
+	procs[meta.ProfileID] = &entry{meta: meta, proc: p, stop: stop}
 }
 
 func Any() bool {
@@ -75,9 +82,24 @@ func Remove(profileID string) {
 func Kill(profileID string) error {
 	mu.Lock()
 	e, ok := procs[profileID]
+	if ok && e.proc != nil {
+		stopped[profileID] = true
+	}
 	mu.Unlock()
 	if !ok || e.proc == nil {
 		return nil
 	}
+	if e.stop != nil {
+		return e.stop()
+	}
 	return e.proc.Kill()
+}
+
+// TakeStopped reports whether the launcher asked to close this instance.
+func TakeStopped(profileID string) bool {
+	mu.Lock()
+	defer mu.Unlock()
+	ok := stopped[profileID]
+	delete(stopped, profileID)
+	return ok
 }

@@ -65,11 +65,25 @@ func InstallNeoForge(mcVersion, requested, javaBin string, emit Progress) (*NeoR
 			meta.Libraries[i].URL = "https://maven.neoforged.net/releases/"
 		}
 	}
-	if err := runInstallerClient(javaBin, installer, emit); err != nil && emit != nil {
-		emit("aviso instalador NeoForge: " + trimMsg(err.Error(), 240))
+	if err := EnsureVanillaLauncherLayout(mcVersion, emit); err != nil {
+		return nil, fmt.Errorf("preparar vanilla para NeoForge: %w", err)
+	}
+	if err := runInstallerClient(javaBin, installer, emit); err != nil {
+		return nil, fmt.Errorf("instalador NeoForge: %w", err)
 	}
 	_, _ = DownloadLibraries(&meta, nil, emit)
 	ensureClientJar(meta.ID, mcVersion)
+	if err := ensureNeoForgeGameJars(ver, mcVersion); err != nil {
+		if emit != nil {
+			emit("Reintentando instalador NeoForge…")
+		}
+		if err2 := runInstallerClient(javaBin, installer, emit); err2 != nil {
+			return nil, fmt.Errorf("instalador NeoForge (retry): %w", err2)
+		}
+		if err := ensureNeoForgeGameJars(ver, mcVersion); err != nil {
+			return nil, err
+		}
+	}
 	return &NeoResult{
 		ID:        meta.ID,
 		Version:   ver,
@@ -118,6 +132,27 @@ func neoPrefix(mc string) string {
 		return parts[1] + ".0."
 	}
 	return mc
+}
+
+// ensureNeoForgeGameJars checks the jars FML needs as the minecraft + neoforge modules.
+func ensureNeoForgeGameJars(neoVer, mcVersion string) error {
+	neoClient := filepath.Join(LibrariesDir(), "net", "neoforged", "neoforge", neoVer, "neoforge-"+neoVer+"-client.jar")
+	if st, err := os.Stat(neoClient); err != nil || st.Size() < 1024 {
+		return fmt.Errorf("falta neoforge-client (%s) — el instalador no terminó", neoClient)
+	}
+	pattern := filepath.Join(LibrariesDir(), "net", "minecraft", "client", mcVersion+"-*", "client-"+mcVersion+"-*-srg.jar")
+	matches, _ := filepath.Glob(pattern)
+	ok := false
+	for _, m := range matches {
+		if st, err := os.Stat(m); err == nil && st.Size() > 1024 {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return fmt.Errorf("falta minecraft client-srg para %s (patrón %s)", mcVersion, pattern)
+	}
+	return nil
 }
 
 func zipFileBytes(zipPath, name string) ([]byte, error) {

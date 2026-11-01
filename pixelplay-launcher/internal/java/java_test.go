@@ -1,6 +1,11 @@
 package java
 
-import "testing"
+import (
+	"archive/zip"
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestMaxCompatibleMajor(t *testing.T) {
 	cases := map[int]int{
@@ -30,5 +35,27 @@ func TestPickJavaPrefersExactRequired(t *testing.T) {
 func TestPickJavaRejectsEmpty(t *testing.T) {
 	if _, ok := pickJava(nil, 21); ok {
 		t.Fatal("expected no java")
+	}
+}
+
+func TestExtractJDKArchiveZipEvenWithTarGzName(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "jdk-21.tar.gz")
+	f, err := os.Create(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zw := zip.NewWriter(f)
+	w, _ := zw.Create("jdk-21.0.8+9/bin/java.exe")
+	_, _ = w.Write([]byte("MZ"))
+	_ = zw.Close()
+	_ = f.Close()
+
+	dest := filepath.Join(dir, "out")
+	if err := extractJDKArchive(src, dest); err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "bin", "java.exe")); err != nil {
+		t.Fatalf("java.exe missing: %v", err)
 	}
 }

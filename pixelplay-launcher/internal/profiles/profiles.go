@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"pixelplay-launcher/internal/lunar"
 	"pixelplay-launcher/internal/paths"
 )
 
@@ -40,23 +41,86 @@ type rawProfile struct {
 	IsStandardVersion       bool    `json:"is_standard_version"`
 }
 
-// RawList returns the full profiles.json array (exact UI Profile shape).
-func RawList() (json.RawMessage, error) {
+// EnsureStore creates the data layout and an empty profiles.json when missing.
+// Fresh installs used to fail UI with "Failed to load profiles data" because
+// RawList/List errored on a missing file.
+func EnsureStore() error {
+	if err := paths.EnsureLayout(); err != nil {
+		return err
+	}
+	p := paths.ProfilesFile()
+	if _, err := os.Stat(p); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	return os.WriteFile(p, []byte("[]\n"), 0o644)
+}
+
+func readProfilesFile() ([]byte, error) {
+	_ = EnsureStore()
 	data, err := os.ReadFile(paths.ProfilesFile())
 	if err != nil {
+		if os.IsNotExist(err) {
+			return []byte("[]"), nil
+		}
 		return nil, fmt.Errorf("leer profiles.json: %w", err)
+	}
+	trimmed := strings.TrimSpace(string(data))
+	if trimmed == "" {
+		return []byte("[]"), nil
+	}
+	// Genesis supplies Fabric itself; expose Fabric to content catalogs even for
+	// older private profiles saved as vanilla. Preserve all other profile fields.
+	var entries []map[string]json.RawMessage
+	if json.Unmarshal(data, &entries) == nil {
+		changed := false
+		for _, entry := range entries {
+			if string(entry["lunar_runtime"]) == "true" {
+				var version string
+				_ = json.Unmarshal(entry["game_version"], &version)
+				runtimeVersion, err := lunar.RuntimeForVersion(version)
+				if err == nil {
+					loader, _ := json.Marshal(runtimeVersion.ContentLoader)
+					if string(entry["loader"]) != string(loader) {
+						entry["loader"] = loader
+						changed = true
+					}
+				}
+			}
+		}
+		if changed {
+			return json.Marshal(entries)
+		}
+	}
+	return data, nil
+}
+
+// RawList returns the full profiles.json array (exact UI Profile shape).
+func RawList() (json.RawMessage, error) {
+	data, err := readProfilesFile()
+	if err != nil {
+		return nil, err
 	}
 	if !json.Valid(data) {
 		return nil, fmt.Errorf("profiles.json inválido")
+	}
+	// Accept only a JSON array; otherwise the UI crashes parsing all_profiles.
+	var arr []json.RawMessage
+	if err := json.Unmarshal(data, &arr); err != nil {
+		return nil, fmt.Errorf("profiles.json inválido: se esperaba un array")
+	}
+	if arr == nil {
+		return json.RawMessage("[]"), nil
 	}
 	return json.RawMessage(data), nil
 }
 
 // RawGet returns one full profile object by id.
 func RawGet(id string) (json.RawMessage, error) {
-	data, err := os.ReadFile(paths.ProfilesFile())
+	data, err := readProfilesFile()
 	if err != nil {
-		return nil, fmt.Errorf("leer profiles.json: %w", err)
+		return nil, err
 	}
 	var arr []json.RawMessage
 	if err := json.Unmarshal(data, &arr); err != nil {
@@ -78,13 +142,16 @@ func RawGet(id string) (json.RawMessage, error) {
 
 // List reads profiles.json from the shared data directory.
 func List() ([]Summary, error) {
-	data, err := os.ReadFile(paths.ProfilesFile())
+	data, err := readProfilesFile()
 	if err != nil {
-		return nil, fmt.Errorf("leer profiles.json: %w", err)
+		return nil, err
 	}
 	var raw []rawProfile
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("parse profiles.json: %w", err)
+	}
+	if raw == nil {
+		raw = []rawProfile{}
 	}
 	out := make([]Summary, 0, len(raw))
 	for _, p := range raw {
@@ -126,6 +193,20 @@ func Search(query string) ([]Summary, error) {
 		}
 	}
 	return out, nil
+}
+
+// FindByPath returns the first profile whose folder name matches path.
+func FindByPath(path string) *Summary {
+	all, err := List()
+	if err != nil {
+		return nil
+	}
+	for i := range all {
+		if all[i].Path == path {
+			return &all[i]
+		}
+	}
+	return nil
 }
 
 // Get returns one profile summary by id.
@@ -171,6 +252,12 @@ func loadAll() ([]map[string]any, error) {
 }
 
 func saveAll(arr []map[string]any) error {
+	if err := paths.EnsureLayout(); err != nil {
+		return err
+	}
+	if arr == nil {
+		arr = []map[string]any{}
+	}
 	b, err := json.MarshalIndent(arr, "", "  ")
 	if err != nil {
 		return err
@@ -184,6 +271,47 @@ func slugPath(name string) string {
 		s = "profile"
 	}
 	return s
+}
+
+// uniqueProfilePath picks a folder name that is not used by another profile
+// and does not already contain leftover files (old installs, copied packs, etc.).
+func uniqueProfilePath(desired string) string {
+	used := map[string]bool{}
+	if arr, err := loadAll(); err == nil {
+		for _, p := range arr {
+			if path, _ := p["path"].(string); path != "" {
+				used[path] = true
+			}
+		}
+	}
+	return nextUniquePath(desired, func(candidate string) bool {
+		if used[candidate] {
+			return true
+		}
+		return dirHasEntries(paths.ProfileDir(candidate))
+	})
+}
+
+func nextUniquePath(desired string, taken func(string) bool) string {
+	base := slugPath(desired)
+	if !taken(base) {
+		return base
+	}
+	for n := 1; n < 10000; n++ {
+		candidate := fmt.Sprintf("%s (%d)", base, n)
+		if !taken(candidate) {
+			return candidate
+		}
+	}
+	return base + "-" + uuid.NewString()[:8]
+}
+
+func dirHasEntries(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	return len(entries) > 0
 }
 
 func defaultSettings() map[string]any {
@@ -232,11 +360,16 @@ func Create(params map[string]any) (string, error) {
 	if v, ok := params["selected_pixelplay_pack_id"]; ok {
 		pack = v
 	}
+	path, _ := params["path"].(string)
+	if path == "" {
+		path = name
+	}
+	path = uniqueProfilePath(path)
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	p := map[string]any{
 		"id":                               id,
 		"name":                             name,
-		"path":                             slugPath(name),
+		"path":                             path,
 		"game_version":                     gv,
 		"loader":                           strings.ToLower(loader),
 		"loader_version":                   loaderVer,
@@ -256,6 +389,12 @@ func Create(params map[string]any) (string, error) {
 		"background":                       nil,
 		"pixelplay_information":            nil,
 		"modpack_info":                     nil,
+	}
+	if loader == "horizon" {
+		p["game_version"] = "26.3"
+		p["horizon_runtime"] = true
+		p["loader_version"] = nil
+		p["selected_pixelplay_pack_id"] = nil
 	}
 	arr = append(arr, p)
 	if err := saveAll(arr); err != nil {
@@ -297,6 +436,20 @@ func Update(id string, params map[string]any) error {
 	return saveAll(arr)
 }
 
+func ClearLoaderVersion(id string) error {
+	arr, err := loadAll()
+	if err != nil {
+		return err
+	}
+	for i, p := range arr {
+		if pid, _ := p["id"].(string); pid == id {
+			arr[i]["loader_version"] = nil
+			return saveAll(arr)
+		}
+	}
+	return fmt.Errorf("perfil no encontrado: %s", id)
+}
+
 func Delete(id string) error {
 	arr, err := loadAll()
 	if err != nil {
@@ -323,10 +476,16 @@ func Copy(sourceID, newName string) (string, error) {
 	}
 	id := uuid.NewString()
 	p["id"] = id
-	if newName != "" {
-		p["name"] = newName
-		p["path"] = slugPath(newName)
+	name := newName
+	if name == "" {
+		if s, _ := p["name"].(string); s != "" {
+			name = s + " (copy)"
+		} else {
+			name = "profile (copy)"
+		}
 	}
+	p["name"] = name
+	p["path"] = uniqueProfilePath(name)
 	p["created"] = time.Now().UTC().Format(time.RFC3339Nano)
 	p["last_played"] = nil
 	arr, err := loadAll()
@@ -337,6 +496,7 @@ func Copy(sourceID, newName string) (string, error) {
 	if err := saveAll(arr); err != nil {
 		return "", err
 	}
+	_ = os.MkdirAll(paths.ProfileDir(p["path"].(string)), 0o755)
 	return id, nil
 }
 

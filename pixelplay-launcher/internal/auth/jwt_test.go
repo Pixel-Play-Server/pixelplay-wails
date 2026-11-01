@@ -64,10 +64,34 @@ func TestLiveEnsurePixelplay(t *testing.T) {
 		t.Fatal("expected production pixelplay token")
 	}
 }
+func TestApplyPixelClaimsFromMicrosoft(t *testing.T) {
+	token := jwtToken(map[string]any{
+		"exp":      time.Now().Add(time.Hour).Unix(),
+		"username": "Joacoorandom",
+		"rank":     "pixel_plus",
+		"kind":     "premium",
+	})
+	c := accounts.Credentials{
+		Username:    "Joacoorandom",
+		AccessToken: "ms-token",
+		PixelplayCredentials: accounts.PixelplayCredentials{
+			Production: &accounts.Token{Value: token},
+		},
+	}
+	got := applyPixelClaims(c)
+	if got.Rank != "pixel_plus" || got.Kind != "premium" {
+		t.Fatalf("claims %+v", got)
+	}
+	if !got.PixelAccount() || got.PixelPasswordAccount() {
+		t.Fatal("microsoft + jwt should be a Pixel account")
+	}
+}
+
 func TestPixelplayTokenOK(t *testing.T) {
 	token := jwtToken(map[string]any{
 		"exp":      time.Now().Add(time.Hour).Unix(),
 		"username": "Joacoorandom",
+		"rank":     "pixel_plus",
 	})
 	c := accounts.Credentials{
 		Username: "Joacoorandom",

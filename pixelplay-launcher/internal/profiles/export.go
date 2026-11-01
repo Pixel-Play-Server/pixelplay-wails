@@ -36,6 +36,8 @@ func Export(profileID, fileName string, includeFiles []string, openFolder bool) 
 	if err := os.MkdirAll(exportDir, 0o755); err != nil {
 		return "", err
 	}
+	// .pixelplaypack = perfil del launcher (profile.json), no pack de Studio (manifest.json).
+	// Evita colisión con .ppack de PixelModpack Studio.
 	dest := filepath.Join(exportDir, safe+".pixelplaypack")
 	f, err := os.Create(dest)
 	if err != nil {
@@ -72,11 +74,11 @@ func Export(profileID, fileName string, includeFiles []string, openFolder bool) 
 				if err != nil {
 					return nil
 				}
-				return zipFile(zw, p, filepath.ToSlash(relFile))
+				return zipFile(zw, p, "overrides/"+filepath.ToSlash(relFile))
 			})
 			continue
 		}
-		_ = zipFile(zw, src, rel)
+		_ = zipFile(zw, src, "overrides/"+rel)
 	}
 	if err := zw.Close(); err != nil {
 		return "", err

@@ -17,9 +17,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"pixelplay-launcher/internal/accounts"
 	"pixelplay-launcher/internal/httpx"
 	"pixelplay-launcher/internal/paths"
 )
+
+const pixelAPIBase = "https://api.pixelplay.gg/api/v1"
 
 type Skin struct {
 	ID          string  `json:"id"`
@@ -130,39 +133,51 @@ func AddLocal(name, variant, description, b64 string) (Skin, error) {
 	return s, save(st)
 }
 
-func UserProfile(accessToken, uuidStr string) (json.RawMessage, error) {
+func UserProfile(accessToken, uuidStr, username string) (json.RawMessage, error) {
+	acc, _ := accounts.Active()
+	if username == "" && acc != nil {
+		username = acc.Username
+	}
+	if strings.TrimSpace(uuidStr) == "" && acc != nil {
+		uuidStr = acc.ID
+	}
 	uuidStr = strings.ReplaceAll(strings.TrimSpace(uuidStr), "-", "")
-	if len(uuidStr) == 32 {
+	msToken := strings.TrimSpace(accessToken)
+	offline := acc != nil && acc.Offline()
+	if offline {
+		msToken = ""
+	}
+
+	if !offline && len(uuidStr) == 32 {
 		if b, err := sessionProfile(uuidStr); err == nil && len(b) > 2 {
 			return b, nil
 		}
 	}
-	if strings.TrimSpace(accessToken) == "" {
-		return nil, fmt.Errorf("falta access token o UUID para la skin")
+	if msToken != "" {
+		req, err := http.NewRequest(http.MethodGet, "https://api.minecraftservices.com/minecraft/profile", nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "Bearer "+msToken)
+		req.Header.Set("User-Agent", httpx.UserAgent)
+		res, err := httpx.Client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer res.Body.Close()
+		b, err := io.ReadAll(res.Body)
+		if err != nil {
+			return nil, err
+		}
+		if res.StatusCode < 400 {
+			converted, err := servicesProfileToSession(b)
+			if err != nil {
+				return json.RawMessage(b), nil
+			}
+			return converted, nil
+		}
 	}
-	req, err := http.NewRequest(http.MethodGet, "https://api.minecraftservices.com/minecraft/profile", nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-	req.Header.Set("User-Agent", httpx.UserAgent)
-	res, err := httpx.Client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer res.Body.Close()
-	b, err := io.ReadAll(res.Body)
-	if err != nil {
-		return nil, err
-	}
-	if res.StatusCode >= 400 {
-		return nil, fmt.Errorf("perfil Minecraft: %s — %s", res.Status, truncate(string(b)))
-	}
-	converted, err := servicesProfileToSession(b)
-	if err != nil {
-		return json.RawMessage(b), nil
-	}
-	return converted, nil
+	return pixelOrLocalProfile(uuidStr, username), nil
 }
 
 func sessionProfile(uuidStr string) (json.RawMessage, error) {
@@ -230,10 +245,53 @@ func servicesProfileToSession(raw []byte) (json.RawMessage, error) {
 	return json.RawMessage(b), err
 }
 
+func applyTokens(accessToken string) (msToken, pixelToken string) {
+	acc, _ := accounts.Active()
+	if acc != nil {
+		pixelToken = acc.PixelToken()
+		if !acc.Offline() && strings.TrimSpace(acc.AccessToken) != "" {
+			msToken = acc.AccessToken
+		}
+	}
+	if msToken == "" && strings.TrimSpace(accessToken) != "" && (acc == nil || !acc.Offline()) {
+		msToken = strings.TrimSpace(accessToken)
+	}
+	return msToken, pixelToken
+}
+
 func ApplyPNG(accessToken, variant string, png []byte) error {
 	if variant == "" {
 		variant = "classic"
 	}
+	msToken, pixelToken := applyTokens(accessToken)
+	var first error
+	ok := false
+	if pixelToken != "" {
+		if err := applyPixelSkin(pixelToken, variant, png); err != nil {
+			first = err
+		} else {
+			ok = true
+		}
+	}
+	if msToken != "" {
+		if err := applyMojangPNG(msToken, variant, png); err != nil {
+			if first == nil {
+				first = err
+			}
+		} else {
+			ok = true
+		}
+	}
+	if ok {
+		return nil
+	}
+	if first != nil {
+		return first
+	}
+	return fmt.Errorf("iniciá sesión con Pixel o Microsoft para aplicar la skin")
+}
+
+func applyMojangPNG(accessToken, variant string, png []byte) error {
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
 	_ = w.WriteField("variant", variant)
@@ -263,6 +321,48 @@ func ApplyPNG(accessToken, variant string, png []byte) error {
 	return nil
 }
 
+func applyPixelSkin(token, variant string, png []byte) error {
+	req, err := http.NewRequest(http.MethodPost, pixelAPIBase+"/cosmetics/skin?variant="+url.QueryEscape(variant), bytes.NewReader(png))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "image/png")
+	req.Header.Set("User-Agent", httpx.UserAgent)
+	res, err := httpx.Client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	b, _ := io.ReadAll(res.Body)
+	if res.StatusCode >= 400 {
+		return fmt.Errorf("skin Pixel: %s — %s", res.Status, truncate(string(b)))
+	}
+	var out struct {
+		SkinHash string `json:"skinHash"`
+	}
+	_ = json.Unmarshal(b, &out)
+	if strings.TrimSpace(out.SkinHash) == "" {
+		return nil
+	}
+	equip, err := http.NewRequest(http.MethodPost, pixelAPIBase+"/cosmetics/skin/"+url.PathEscape(out.SkinHash)+"/equip", nil)
+	if err != nil {
+		return err
+	}
+	equip.Header.Set("Authorization", "Bearer "+token)
+	equip.Header.Set("User-Agent", httpx.UserAgent)
+	eqRes, err := httpx.Client.Do(equip)
+	if err != nil {
+		return err
+	}
+	defer eqRes.Body.Close()
+	if eqRes.StatusCode >= 400 {
+		eb, _ := io.ReadAll(eqRes.Body)
+		return fmt.Errorf("equipar skin Pixel: %s — %s", eqRes.Status, truncate(string(eb)))
+	}
+	return nil
+}
+
 func ApplyBase64(accessToken, variant, b64 string) error {
 	b64 = strings.TrimPrefix(b64, "data:image/png;base64,")
 	png, err := base64.StdEncoding.DecodeString(b64)
@@ -273,6 +373,54 @@ func ApplyBase64(accessToken, variant, b64 string) error {
 }
 
 func Reset(accessToken string) error {
+	msToken, pixelToken := applyTokens(accessToken)
+	var first error
+	ok := false
+	if pixelToken != "" {
+		if err := resetPixelSkin(pixelToken); err != nil {
+			first = err
+		} else {
+			ok = true
+		}
+	}
+	if msToken != "" {
+		if err := resetMojangSkin(msToken); err != nil {
+			if first == nil {
+				first = err
+			}
+		} else {
+			ok = true
+		}
+	}
+	if ok {
+		return nil
+	}
+	if first != nil {
+		return first
+	}
+	return fmt.Errorf("iniciá sesión con Pixel o Microsoft para resetear la skin")
+}
+
+func resetPixelSkin(token string) error {
+	req, err := http.NewRequest(http.MethodPost, pixelAPIBase+"/cosmetics/skin/unequip", nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("User-Agent", httpx.UserAgent)
+	res, err := httpx.Client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	if res.StatusCode >= 400 && res.StatusCode != 404 {
+		b, _ := io.ReadAll(res.Body)
+		return fmt.Errorf("reset skin Pixel: %s — %s", res.Status, truncate(string(b)))
+	}
+	return nil
+}
+
+func resetMojangSkin(accessToken string) error {
 	req, err := http.NewRequest(http.MethodDelete, "https://api.minecraftservices.com/minecraft/profile/skins/active", nil)
 	if err != nil {
 		return err
@@ -288,6 +436,120 @@ func Reset(accessToken string) error {
 		return fmt.Errorf("reset skin: %s — %s", res.Status, truncate(string(b)))
 	}
 	return nil
+}
+
+func pixelOrLocalProfile(compact, name string) json.RawMessage {
+	if name == "" {
+		name = "Player"
+	}
+	id := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(compact), "-", ""))
+	skinURL := ""
+	capeURL := ""
+	if len(id) == 32 {
+		candidate := pixelAPIBase + "/player/" + id + "/skin.png"
+		if remotePNGExists(candidate) {
+			skinURL = candidate
+		}
+		capeCandidate := pixelAPIBase + "/player/" + id + "/cape.png"
+		if remotePNGExists(capeCandidate) {
+			capeURL = capeCandidate
+		}
+	}
+	if skinURL == "" && name != "" && name != "Player" {
+		csl := pixelCSLProfile(name)
+		if csl.skinURL != "" {
+			skinURL = csl.skinURL
+			if capeURL == "" {
+				capeURL = csl.capeURL
+			}
+			if csl.name != "" {
+				name = csl.name
+			}
+		}
+	}
+	return sessionLikeProfile(id, name, skinURL, capeURL, "")
+}
+
+type cslSkin struct {
+	name    string
+	skinURL string
+	capeURL string
+}
+
+func pixelCSLProfile(name string) cslSkin {
+	var raw struct {
+		Username string `json:"username"`
+		Skins    struct {
+			Default string `json:"default"`
+			Slim    string `json:"slim"`
+		} `json:"skins"`
+		Cape string `json:"cape"`
+	}
+	if err := httpx.GetJSON(pixelAPIBase+"/csl/"+url.PathEscape(name), &raw); err != nil {
+		return cslSkin{}
+	}
+	skin := raw.Skins.Default
+	if skin == "" {
+		skin = raw.Skins.Slim
+	}
+	n := raw.Username
+	if n == "" {
+		n = name
+	}
+	return cslSkin{name: n, skinURL: skin, capeURL: raw.Cape}
+}
+
+func remotePNGExists(rawURL string) bool {
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("User-Agent", httpx.UserAgent)
+	req.Header.Set("Accept", "image/png,image/*,*/*")
+	res, err := httpx.Client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer res.Body.Close()
+	if res.StatusCode >= 400 {
+		return false
+	}
+	b, err := io.ReadAll(io.LimitReader(res.Body, 16))
+	if err != nil || len(b) < 8 {
+		return false
+	}
+	return b[0] == 0x89 && b[1] == 'P' && b[2] == 'N' && b[3] == 'G'
+}
+
+func sessionLikeProfile(id, name, skinURL, capeURL, model string) json.RawMessage {
+	id = strings.ToLower(strings.ReplaceAll(strings.TrimSpace(id), "-", ""))
+	tex := map[string]any{
+		"timestamp":   time.Now().UnixMilli(),
+		"profileId":   id,
+		"profileName": name,
+		"textures":    map[string]any{},
+	}
+	textures := tex["textures"].(map[string]any)
+	if skinURL != "" {
+		skin := map[string]any{"url": skinURL}
+		if strings.EqualFold(model, "slim") {
+			skin["metadata"] = map[string]any{"model": "slim"}
+		}
+		textures["SKIN"] = skin
+	}
+	if capeURL != "" {
+		textures["CAPE"] = map[string]any{"url": capeURL}
+	}
+	tb, _ := json.Marshal(tex)
+	out := map[string]any{
+		"id":   id,
+		"name": name,
+		"properties": []map[string]any{
+			{"name": "textures", "value": base64.StdEncoding.EncodeToString(tb)},
+		},
+	}
+	b, _ := json.Marshal(out)
+	return json.RawMessage(b)
 }
 
 func MojangProfile(query string) (json.RawMessage, error) {

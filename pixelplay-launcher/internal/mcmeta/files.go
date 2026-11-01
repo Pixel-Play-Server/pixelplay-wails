@@ -1,7 +1,6 @@
 package mcmeta
 
 import (
-	"archive/zip"
 	"crypto/sha1"
 	"encoding/hex"
 	"encoding/json"
@@ -11,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"pixelplay-launcher/internal/download"
 	"pixelplay-launcher/internal/paths"
@@ -35,11 +36,14 @@ func DownloadLibraries(meta *PistonMeta, extra []Library, emit Progress) ([]stri
 	var jars []string
 	var mu sync.Mutex
 	var wg sync.WaitGroup
-	errCh := make(chan error, 8)
+	var fail atomic.Pointer[error]
 	sem := make(chan struct{}, 8)
 	n := 0
 	for _, lib := range libs {
 		if !RulesAllow(lib.Rules) {
+			continue
+		}
+		if strings.Contains(lib.Name, ":natives-") && !NativeClassifierWanted(lib.Name) {
 			continue
 		}
 		lib := lib
@@ -47,11 +51,14 @@ func DownloadLibraries(meta *PistonMeta, extra []Library, emit Progress) ([]stri
 		n++
 		go func() {
 			defer wg.Done()
+			if fail.Load() != nil {
+				return
+			}
 			sem <- struct{}{}
 			defer func() { <-sem }()
 			path, err := downloadLib(lib)
 			if err != nil {
-				errCh <- err
+				fail.CompareAndSwap(nil, &err)
 				return
 			}
 			if path != "" {
@@ -62,11 +69,8 @@ func DownloadLibraries(meta *PistonMeta, extra []Library, emit Progress) ([]stri
 		}()
 	}
 	wg.Wait()
-	close(errCh)
-	for err := range errCh {
-		if err != nil {
-			return nil, err
-		}
+	if errp := fail.Load(); errp != nil {
+		return nil, *errp
 	}
 	if emit != nil {
 		emit(fmt.Sprintf("Libraries: %d jars", len(jars)))
@@ -146,6 +150,9 @@ func ExtractNatives(meta *PistonMeta, extra []Library) error {
 		if !RulesAllow(lib.Rules) {
 			continue
 		}
+		if strings.Contains(lib.Name, ":natives-") && !NativeClassifierWanted(lib.Name) {
+			continue
+		}
 		var nativeArt *Artifact
 		if lib.Downloads != nil && lib.Natives != nil {
 			if key, ok := lib.Natives[osName]; ok {
@@ -178,43 +185,7 @@ func ExtractNatives(meta *PistonMeta, extra []Library) error {
 			}
 		}
 		if err := unzipNatives(jar, dest); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func unzipNatives(jar, dest string) error {
-	zr, err := zip.OpenReader(jar)
-	if err != nil {
-		return err
-	}
-	defer zr.Close()
-	for _, f := range zr.File {
-		name := filepath.ToSlash(f.Name)
-		if strings.HasPrefix(name, "META-INF/") {
-			continue
-		}
-		target := filepath.Join(dest, filepath.FromSlash(name))
-		if f.FileInfo().IsDir() {
-			_ = os.MkdirAll(target, 0o755)
-			continue
-		}
-		_ = os.MkdirAll(filepath.Dir(target), 0o755)
-		rc, err := f.Open()
-		if err != nil {
-			return err
-		}
-		out, err := os.Create(target)
-		if err != nil {
-			rc.Close()
-			return err
-		}
-		_, err = io.Copy(out, rc)
-		out.Close()
-		rc.Close()
-		if err != nil {
-			return err
+			return fmt.Errorf("extract natives %s: %w", lib.Name, err)
 		}
 	}
 	return nil
@@ -234,6 +205,9 @@ func DownloadAssets(meta *PistonMeta, emit Progress) error {
 	}
 	idxPath := filepath.Join(AssetsDir(), "indexes", meta.AssetIndex.ID+".json")
 	if !fileOK(idxPath, meta.AssetIndex.SHA1) {
+		if emit != nil {
+			emit("Descargando índice de assets…")
+		}
 		if err := download.File(meta.AssetIndex.URL, idxPath, nil); err != nil {
 			return err
 		}
@@ -252,10 +226,10 @@ func DownloadAssets(meta *PistonMeta, emit Progress) error {
 		return err
 	}
 	objectsDir := filepath.Join(AssetsDir(), "objects")
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, 12)
-	errCh := make(chan error, 12)
-	i := 0
+	type job struct {
+		url, dest, hash string
+	}
+	var jobs []job
 	for _, obj := range idx.Objects {
 		hash := obj.Hash
 		if len(hash) < 2 {
@@ -266,27 +240,83 @@ func DownloadAssets(meta *PistonMeta, emit Progress) error {
 		if fileOK(dest, hash) {
 			continue
 		}
-		url := "https://resources.download.minecraft.net/" + rel
+		jobs = append(jobs, job{
+			url:  "https://resources.download.minecraft.net/" + rel,
+			dest: dest,
+			hash: hash,
+		})
+	}
+	total := len(jobs)
+	if total == 0 {
+		if emit != nil {
+			emit(fmt.Sprintf("Assets listos (%s)", meta.AssetIndex.ID))
+		}
+		return nil
+	}
+	if emit != nil {
+		emit(fmt.Sprintf("Assets 0/%d…", total))
+	}
+
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 16)
+	var done atomic.Int64
+	var fail atomic.Pointer[error]
+	var lastEmit atomic.Int64
+	lastEmit.Store(time.Now().UnixNano())
+
+	report := func() {
+		if emit == nil {
+			return
+		}
+		now := time.Now().UnixNano()
+		prev := lastEmit.Load()
+		if now-prev < int64(400*time.Millisecond) {
+			return
+		}
+		if !lastEmit.CompareAndSwap(prev, now) {
+			return
+		}
+		n := done.Load()
+		emit(fmt.Sprintf("Assets %d/%d…", n, total))
+	}
+
+	for _, j := range jobs {
+		j := j
 		wg.Add(1)
-		i++
 		go func() {
 			defer wg.Done()
+			if fail.Load() != nil {
+				return
+			}
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			if err := download.File(url, dest, nil); err != nil {
-				errCh <- err
+			if fail.Load() != nil {
+				return
 			}
+			var last error
+			for attempt := 0; attempt < 3; attempt++ {
+				if err := download.FileWith(download.SmallFile, j.url, j.dest, nil); err != nil {
+					last = err
+					time.Sleep(time.Duration(attempt+1) * 400 * time.Millisecond)
+					continue
+				}
+				last = nil
+				break
+			}
+			if last != nil {
+				fail.CompareAndSwap(nil, &last)
+				return
+			}
+			done.Add(1)
+			report()
 		}()
 	}
 	wg.Wait()
-	close(errCh)
-	for err := range errCh {
-		if err != nil {
-			return err
-		}
+	if errp := fail.Load(); errp != nil {
+		return fmt.Errorf("assets: %w", *errp)
 	}
 	if emit != nil {
-		emit(fmt.Sprintf("Assets listos (%s)", meta.AssetIndex.ID))
+		emit(fmt.Sprintf("Assets listos (%d, %s)", total, meta.AssetIndex.ID))
 	}
 	return nil
 }

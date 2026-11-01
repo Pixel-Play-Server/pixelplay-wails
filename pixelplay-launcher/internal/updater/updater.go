@@ -20,8 +20,11 @@ const DefaultBaseURL = "https://panel.pixelplay.gg/dl"
 // DefaultChannel is "stable" or "beta". Beta builds set this via -ldflags.
 var DefaultChannel = "stable"
 
-// AppVersion is the Go/Wails launcher version (semver-ish).
-const AppVersion = "5.0.3"
+// PrivateBuild disables public update checks for local experimental builds.
+var PrivateBuild = ""
+
+// AppVersion is kept for smoke tools; prefer version.App in production paths.
+const AppVersion = "6.0.3"
 
 // StatusEvent matches the Tauri updater_status payload shape.
 type StatusEvent struct {
@@ -73,12 +76,14 @@ func UseBeta() bool {
 	return cfg.Check
 }
 
-func releasesRoot() string {
+func releasesRootFor(beta bool) string {
 	base := strings.TrimRight(baseURL(), "/")
-	beta := UseBeta()
 	switch {
 	case strings.Contains(base, "/releases-v2-beta"):
-		return base
+		if beta {
+			return base
+		}
+		return strings.Replace(base, "/releases-v2-beta", "/releases-v2", 1)
 	case strings.Contains(base, "/releases-v2"):
 		if beta {
 			return strings.Replace(base, "/releases-v2", "/releases-v2-beta", 1)
@@ -89,6 +94,10 @@ func releasesRoot() string {
 	default:
 		return base + "/pixelplay/releases-v2"
 	}
+}
+
+func releasesRoot() string {
+	return releasesRootFor(UseBeta())
 }
 
 func platformTarget() string {
@@ -118,58 +127,121 @@ func ManifestURL(currentVersion string) string {
 	)
 }
 
+// LatestManifestURL points at the channel tip (always backfilled on publish).
+func LatestManifestURL() string {
+	return fmt.Sprintf("%s/%s/latest/version.json", releasesRoot(), platformTarget())
+}
+
+func candidateManifestURLs(currentVersion string) []string {
+	plat := platformTarget()
+	seen := map[string]bool{}
+	var out []string
+	add := func(root, ver string) {
+		u := fmt.Sprintf("%s/%s/%s/version.json", root, plat, ver)
+		if seen[u] {
+			return
+		}
+		seen[u] = true
+		out = append(out, u)
+	}
+	// Always consult stable tip so beta users aren't stuck behind a stale beta tree.
+	stableRoot := releasesRootFor(false)
+	add(stableRoot, currentVersion)
+	add(stableRoot, "latest")
+	if UseBeta() {
+		betaRoot := releasesRootFor(true)
+		add(betaRoot, currentVersion)
+		add(betaRoot, "latest")
+	}
+	return out
+}
+
+func fetchManifest(url string) (*Manifest, int, error) {
+	client := &http.Client{Timeout: 20 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, resp.StatusCode, nil
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, resp.StatusCode, err
+	}
+	var man Manifest
+	if err := json.Unmarshal(body, &man); err != nil {
+		return nil, resp.StatusCode, err
+	}
+	return &man, resp.StatusCode, nil
+}
+
 // Check fetches version.json from the Pixel host and reports whether an update exists.
+// It checks the per-version folder (Tauri-style) and always also consults /latest so
+// Windows/Linux clients aren't stuck when a backfill was missed for their build.
+// If the beta channel is enabled, stable tip is still considered so a stale beta
+// tree cannot hide newer stable releases.
 func Check(currentVersion string, emit Emitter) (*Manifest, bool, error) {
+	if PrivateBuild == "true" {
+		if emit != nil {
+			emit(StatusEvent{Status: "upToDate", Message: "Compilación privada local: actualizaciones públicas desactivadas"})
+			emit(StatusEvent{Status: "close", Message: "private build"})
+		}
+		return nil, false, nil
+	}
 	if emit == nil {
 		emit = func(StatusEvent) {}
 	}
 	emit(StatusEvent{Status: "checking", Message: "Checking for updates on panel.pixelplay.gg…"})
 
-	url := ManifestURL(currentVersion)
-	client := &http.Client{Timeout: 20 * time.Second}
-	resp, err := client.Get(url)
-	if err != nil {
-		emit(StatusEvent{Status: "error", Message: fmt.Sprintf("No se pudo contactar el updater: %v", err)})
-		return nil, false, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusNotFound {
-		emit(StatusEvent{Status: "upToDate", Message: "Ya estás en la última versión."})
-		emit(StatusEvent{Status: "close", Message: "up to date"})
-		return nil, false, nil
-	}
-	if resp.StatusCode != http.StatusOK {
-		msg := fmt.Sprintf("Updater HTTP %d (%s)", resp.StatusCode, url)
-		emit(StatusEvent{Status: "error", Message: msg})
-		emit(StatusEvent{Status: "close", Message: msg})
-		return nil, false, fmt.Errorf("%s", msg)
-	}
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		emit(StatusEvent{Status: "error", Message: err.Error()})
-		return nil, false, err
-	}
-	var man Manifest
-	if err := json.Unmarshal(body, &man); err != nil {
-		emit(StatusEvent{Status: "error", Message: "version.json inválido"})
-		return nil, false, err
-	}
-	if man.Version == "" || man.Version == currentVersion || !isNewer(man.Version, currentVersion) {
-		emit(StatusEvent{Status: "upToDate", Message: "Ya estás en la última versión."})
-		emit(StatusEvent{Status: "close", Message: "up to date"})
-		return &man, false, nil
+	candidates := candidateManifestURLs(currentVersion)
+	var best *Manifest
+	var lastErr error
+	sawOK := false
+	for _, url := range candidates {
+		man, code, err := fetchManifest(url)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if code == http.StatusNotFound {
+			continue
+		}
+		if code != http.StatusOK || man == nil || man.Version == "" {
+			if code != 0 && code != http.StatusOK {
+				lastErr = fmt.Errorf("Updater HTTP %d (%s)", code, url)
+			}
+			continue
+		}
+		sawOK = true
+		if man.Version == currentVersion || !isNewer(man.Version, currentVersion) {
+			continue
+		}
+		if best == nil || isNewer(man.Version, best.Version) {
+			cp := *man
+			best = &cp
+		}
 	}
 
-	emit(StatusEvent{
-		Status:      "available",
-		Message:     fmt.Sprintf("Actualización disponible: %s → %s", currentVersion, man.Version),
-		FromVersion: currentVersion,
-		ToVersion:   man.Version,
-		URL:         man.URL,
-	})
-	return &man, true, nil
+	if best != nil {
+		emit(StatusEvent{
+			Status:      "available",
+			Message:     fmt.Sprintf("Actualización disponible: %s → %s", currentVersion, best.Version),
+			FromVersion: currentVersion,
+			ToVersion:   best.Version,
+			URL:         best.URL,
+		})
+		return best, true, nil
+	}
+	if !sawOK && lastErr != nil {
+		emit(StatusEvent{Status: "error", Message: fmt.Sprintf("No se pudo contactar el updater: %v", lastErr)})
+		emit(StatusEvent{Status: "close", Message: lastErr.Error()})
+		return nil, false, lastErr
+	}
+	emit(StatusEvent{Status: "upToDate", Message: "Ya estás en la última versión."})
+	emit(StatusEvent{Status: "close", Message: "up to date"})
+	return nil, false, nil
 }
 
 // Download pulls the update binary into destDir and returns the local path.
@@ -185,8 +257,9 @@ func Download(man *Manifest, destDir string, emit Emitter) (string, error) {
 	}
 
 	emit(StatusEvent{Status: "downloading", Message: "Descargando actualización…"})
+	url := DropInURL(man.URL)
 	client := &http.Client{Timeout: 10 * time.Minute}
-	resp, err := client.Get(man.URL)
+	resp, err := client.Get(url)
 	if err != nil {
 		emit(StatusEvent{Status: "error", Message: err.Error()})
 		return "", err
@@ -198,9 +271,12 @@ func Download(man *Manifest, destDir string, emit Emitter) (string, error) {
 		return "", fmt.Errorf("%s", msg)
 	}
 
-	name := filepath.Base(strings.Split(man.URL, "?")[0])
-	if name == "" || name == "." || name == "/" {
-		name = fmt.Sprintf("pixelplay-launcher-%s", man.Version)
+	name := filepath.Base(strings.Split(url, "?")[0])
+	if name == "" || name == "." || name == "/" || looksLikeInstallerName(name) {
+		name = "pixelplay-launcher.exe"
+		if runtime.GOOS != "windows" {
+			name = "pixelplay-launcher"
+		}
 	}
 	outPath := filepath.Join(destDir, name)
 	f, err := os.Create(outPath)
@@ -235,6 +311,33 @@ func Download(man *Manifest, destDir string, emit Emitter) (string, error) {
 	_ = os.Chmod(outPath, 0o755)
 	emit(StatusEvent{Status: "done", Message: fmt.Sprintf("Descarga lista: %s", outPath)})
 	return outPath, nil
+}
+
+// DropInURL forces in-app updates onto the raw binary, never the NSIS setup.
+// Web installs use PixelPlaySetup.exe; the launcher updater always drop-ins .exe/.bin.
+func DropInURL(u string) string {
+	u = strings.TrimSpace(u)
+	if u == "" {
+		return u
+	}
+	lower := strings.ToLower(u)
+	if !strings.Contains(lower, "installer") && !strings.Contains(lower, "setup") {
+		return u
+	}
+	// …/pixelplay-launcher-amd64-installer.exe → …/pixelplay-launcher.exe
+	if i := strings.LastIndex(u, "/"); i >= 0 {
+		dir := u[:i+1]
+		if strings.HasSuffix(lower, ".exe") || strings.Contains(lower, "windows") {
+			return dir + "pixelplay-launcher.exe"
+		}
+		return dir + "pixelplay-launcher"
+	}
+	return u
+}
+
+func looksLikeInstallerName(name string) bool {
+	b := strings.ToLower(name)
+	return strings.Contains(b, "installer") || strings.Contains(b, "setup")
 }
 
 // isNewer does a loose dotted numeric compare (4.0.1 > 4.0.0; 0.2.0-wails ~ 0.2.0).

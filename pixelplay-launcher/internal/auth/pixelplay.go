@@ -25,9 +25,110 @@ var pixelplayMu sync.Mutex
 
 // EnsurePixelplay refreshes the Minecraft token if needed and obtains a Pixel Play JWT
 // when the stored one is missing, expired, or for another username.
+func LoginPixel(username, password string) (accounts.Credentials, error) {
+	username = strings.TrimSpace(username)
+	if username == "" || strings.TrimSpace(password) == "" {
+		return accounts.Credentials{}, fmt.Errorf("faltan usuario o clave Pixel")
+	}
+	payload, _ := json.Marshal(map[string]string{
+		"username": username,
+		"password": password,
+	})
+	req, err := http.NewRequest(http.MethodPost, pixelplayProdAPI+"/auth/pixel/login", strings.NewReader(string(payload)))
+	if err != nil {
+		return accounts.Credentials{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", httpx.UserAgent)
+	res, err := httpx.Client.Do(req)
+	if err != nil {
+		return accounts.Credentials{}, err
+	}
+	defer res.Body.Close()
+	b, err := io.ReadAll(res.Body)
+	if err != nil {
+		return accounts.Credentials{}, err
+	}
+	if res.StatusCode >= 400 {
+		return accounts.Credentials{}, fmt.Errorf("cuenta Pixel: %s", apiError(b, res.Status))
+	}
+	var out struct {
+		Value   string `json:"value"`
+		Account struct {
+			UUID     string `json:"uuid"`
+			Username string `json:"username"`
+			Rank     string `json:"rank"`
+			Kind     string `json:"kind"`
+		} `json:"account"`
+	}
+	if err := json.Unmarshal(b, &out); err != nil || out.Value == "" {
+		return accounts.Credentials{}, fmt.Errorf("respuesta Pixel inválida")
+	}
+	name := out.Account.Username
+	if name == "" {
+		name = username
+	}
+	id := out.Account.UUID
+	if id == "" {
+		id = name
+	}
+	return accounts.CreatePixel(name, id, out.Value, out.Account.Rank, firstNonEmpty(out.Account.Kind, "pixel"))
+}
+
+func apiError(b []byte, status string) string {
+	var parsed map[string]any
+	if json.Unmarshal(b, &parsed) == nil {
+		if s, ok := parsed["error"].(string); ok && s != "" {
+			return s
+		}
+	}
+	return status + " — " + truncateBody(b)
+}
+
+func firstNonEmpty(vs ...string) string {
+	for _, v := range vs {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func applyPixelClaims(c accounts.Credentials) accounts.Credentials {
+	tok := c.PixelToken()
+	if tok == "" {
+		return c
+	}
+	if rank, ok := jwtClaimString(tok, "rank"); ok {
+		c.Rank = rank
+	} else if strings.TrimSpace(c.Rank) == "" && c.PixelAccount() {
+		c.Rank = "usuario"
+	}
+	if kind, ok := jwtClaimString(tok, "kind"); ok {
+		c.Kind = kind
+	}
+	return c
+}
+
+func persistPixelClaims(c accounts.Credentials) (accounts.Credentials, error) {
+	updated := applyPixelClaims(c)
+	if updated.Rank == c.Rank && updated.Kind == c.Kind {
+		return updated, nil
+	}
+	return accounts.Upsert(updated)
+}
+
 func EnsurePixelplay(c accounts.Credentials) (accounts.Credentials, error) {
-	if c.Offline() {
-		return c, fmt.Errorf("capas Pixel Play requieren cuenta Microsoft")
+	expMode := experimentalMode()
+
+	// Check if existing token is valid and fresh
+	if pixelplayTokenOK(c, expMode) {
+		return persistPixelClaims(c)
+	}
+
+	if c.Offline() && !c.PixelPasswordAccount() {
+		return c, fmt.Errorf("capas y funciones de Pixel Play requieren cuenta Microsoft o Pixel")
 	}
 
 	pixelplayMu.Lock()
@@ -43,9 +144,8 @@ func EnsurePixelplay(c accounts.Credentials) (accounts.Credentials, error) {
 	}
 	c = refreshed
 
-	expMode := experimentalMode()
 	if pixelplayTokenOK(c, expMode) {
-		return c, nil
+		return persistPixelClaims(c)
 	}
 
 	value, err := refreshPixelplayToken(c, expMode)
@@ -58,7 +158,21 @@ func EnsurePixelplay(c accounts.Credentials) (accounts.Credentials, error) {
 	} else {
 		c.PixelplayCredentials.Production = tok
 	}
+	c = applyPixelClaims(c)
 	return accounts.Upsert(c)
+}
+
+// AutoRefreshAllAccountTokens iterates over all accounts and silently renews any expired tokens.
+func AutoRefreshAllAccountTokens() {
+	list, err := accounts.List()
+	if err != nil || len(list) == 0 {
+		return
+	}
+	for _, acc := range list {
+		if !acc.Offline() {
+			_, _ = EnsurePixelplay(acc)
+		}
+	}
 }
 
 func pixelplayTokenOK(c accounts.Credentials, experimental bool) bool {
@@ -72,10 +186,16 @@ func pixelplayTokenOK(c accounts.Credentials, experimental bool) bool {
 	if tok == nil || strings.TrimSpace(tok.Value) == "" {
 		return false
 	}
+	if strings.Contains(tok.Value, "sig_pixelplay_auto_refreshed") {
+		return false
+	}
 	if !jwtFresh(tok.Value, 2*time.Minute) {
 		return false
 	}
 	if name, ok := jwtClaimString(tok.Value, "username"); ok && !strings.EqualFold(name, c.Username) {
+		return false
+	}
+	if _, ok := jwtClaimString(tok.Value, "rank"); !ok {
 		return false
 	}
 	return true

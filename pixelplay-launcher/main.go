@@ -1,7 +1,13 @@
 package main
 
 import (
+	"context"
 	"embed"
+	"fmt"
+	"os"
+
+	"pixelplay-launcher/internal/studiotest"
+	"pixelplay-launcher/internal/webkitperm"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -18,6 +24,22 @@ var assets embed.FS
 var appIcon []byte
 
 func main() {
+	if len(os.Args) >= 2 && os.Args[1] == "--studio-test" {
+		dir := ""
+		if len(os.Args) >= 3 {
+			dir = os.Args[2]
+		}
+		if dir == "" {
+			fmt.Fprintln(os.Stderr, "uso: pixelplay-launcher --studio-test <directorio-del-proyecto>")
+			os.Exit(2)
+		}
+		if err := studiotest.Run(dir); err != nil {
+			fmt.Fprintln(os.Stderr, "studio-test:", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	app := NewApp()
 	err := wails.Run(&options.App{
 		Title:            "Pixel Play",
@@ -32,8 +54,14 @@ func main() {
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
-		OnStartup: app.startup,
-		Bind:      []interface{}{app},
+		OnStartup: func(ctx context.Context) {
+			webkitperm.Install()
+			app.Startup(ctx)
+		},
+		OnDomReady: func(ctx context.Context) {
+			webkitperm.Install()
+		},
+		Bind: []interface{}{app},
 		DragAndDrop: &options.DragAndDrop{
 			EnableFileDrop:     true,
 			DisableWebViewDrop: true,

@@ -136,11 +136,18 @@ func CurrentOSName() string {
 	}
 }
 
+// CurrentArch matches Mojang library rule "os.arch" values.
+// amd64 is x86_64 (not "x86" — that is 32-bit and would wrongly allow
+// natives-*-x86 jars on 64-bit PCs).
 func CurrentArch() string {
-	if runtime.GOARCH == "arm64" {
+	switch runtime.GOARCH {
+	case "arm64":
 		return "arm64"
+	case "386":
+		return "x86"
+	default:
+		return "x86_64"
 	}
-	return "x86"
 }
 
 func RulesAllow(rules []Rule) bool {

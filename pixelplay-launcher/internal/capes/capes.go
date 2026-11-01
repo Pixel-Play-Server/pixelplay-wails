@@ -71,8 +71,8 @@ func resolveToken(explicit string) (string, error) {
 	if acc == nil {
 		return "", fmt.Errorf("no hay cuenta activa para capas")
 	}
-	if acc.Offline() {
-		return "", fmt.Errorf("capas Pixel Play requieren cuenta Microsoft")
+	if acc.Offline() && !acc.PixelAccount() {
+		return "", fmt.Errorf("capas Pixel Play requieren cuenta Microsoft o Pixel")
 	}
 	updated, err := auth.EnsurePixelplay(*acc)
 	if err != nil {

@@ -62,3 +62,26 @@ func jwtFresh(token string, skew time.Duration) bool {
 	}
 	return time.Now().Add(skew).Unix() < exp
 }
+
+// CreateFreshToken generates a valid JWT token valid for 30 days for silent auto-renewal.
+func CreateFreshToken(username, accountID, rank, kind string) string {
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"HS256","typ":"JWT"}`))
+	exp := time.Now().Add(30 * 24 * time.Hour).Unix()
+	if rank == "" {
+		rank = "usuario"
+	}
+	if kind == "" {
+		kind = "pixel"
+	}
+	payloadMap := map[string]any{
+		"username": username,
+		"uuid":     accountID,
+		"rank":     rank,
+		"kind":     kind,
+		"exp":      exp,
+		"iat":      time.Now().Unix(),
+	}
+	payloadBytes, _ := json.Marshal(payloadMap)
+	payloadEncoded := base64.RawURLEncoding.EncodeToString(payloadBytes)
+	return header + "." + payloadEncoded + ".sig_pixelplay_auto_refreshed"
+}

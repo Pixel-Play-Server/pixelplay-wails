@@ -121,7 +121,7 @@ func PollDeviceCode(dev *DeviceStart, openURL func(string), emit func(string)) (
 	if emit != nil {
 		msg := dev.Message
 		if msg == "" {
-			msg = fmt.Sprintf("Abrí %s e ingresá el código %s", dev.VerificationURI, dev.UserCode)
+			msg = fmt.Sprintf("Abre %s e ingresa el código %s", dev.VerificationURI, dev.UserCode)
 		}
 		emit(msg)
 	}

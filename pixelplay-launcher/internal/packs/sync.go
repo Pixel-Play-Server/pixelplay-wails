@@ -11,6 +11,7 @@ import (
 	"pixelplay-launcher/internal/httpx"
 	"pixelplay-launcher/internal/mcmeta"
 	"pixelplay-launcher/internal/paths"
+	"pixelplay-launcher/internal/vault"
 	"pixelplay.gg/ppack"
 )
 
@@ -69,6 +70,7 @@ func SyncPackMods(packID, mcVersion, loader, profileModsDir string, skip map[str
 
 	loader = strings.ToLower(loader)
 	copied := 0
+	protected, _ := IsProtectedByAuthor(packID)
 	for _, m := range mods {
 		target, ok := compatFor(m.Compatibility, mcVersion, loader)
 		if !ok {
@@ -83,6 +85,7 @@ func SyncPackMods(packID, mcVersion, loader, profileModsDir string, skip map[str
 		out := filepath.Join(profileModsDir, filename)
 		if skip[m.ID] {
 			_ = os.Remove(out)
+			vault.Remove(profileModsDir, filename, packID)
 			continue
 		}
 		destCache := filepath.Join(cache, filename)
@@ -98,7 +101,11 @@ func SyncPackMods(packID, mcVersion, loader, profileModsDir string, skip map[str
 		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(out, in, 0o644); err != nil {
+		if protected {
+			if err := vault.Put(profileModsDir, filename, packID, in); err != nil {
+				return err
+			}
+		} else if err := os.WriteFile(out, in, 0o644); err != nil {
 			return err
 		}
 		copied++
@@ -106,6 +113,24 @@ func SyncPackMods(packID, mcVersion, loader, profileModsDir string, skip map[str
 	if emit != nil {
 		emit(fmt.Sprintf("Mods del pack: %d", copied))
 	}
+	// Always prune leftovers (e.g. NeoForge jars after switching the pack to Fabric).
+	keep := map[string]bool{}
+	for _, m := range mods {
+		if skip[m.ID] {
+			continue
+		}
+		target, ok := compatFor(m.Compatibility, mcVersion, loader)
+		if !ok {
+			continue
+		}
+		filename := target.Filename
+		if filename == "" {
+			filename = m.ID + ".jar"
+		}
+		keep[filename] = true
+		keep[filename+".disabled"] = true
+	}
+	pruneUnlistedJars(profileModsDir, packID, keep)
 	if skip["sodiumleafculling"] {
 		dropJarsMatching(profileModsDir, "sodiumleafculling")
 	}
@@ -158,6 +183,63 @@ func dropJarsMatching(dir, needle string) {
 		if strings.Contains(strings.ToLower(e.Name()), n) {
 			_ = os.Remove(filepath.Join(dir, e.Name()))
 		}
+	}
+}
+
+// pruneUnlistedJars drops jars (and their vault blobs) that are no longer in the pack.
+// Protected packs must not keep leftovers from Mod Menu drag-drop or removed mods.
+func pruneUnlistedJars(modsDir, packID string, keep map[string]bool) {
+	entries, err := os.ReadDir(modsDir)
+	if err != nil {
+		return
+	}
+	keepBlobs := map[string]bool{}
+	for name := range keep {
+		base := strings.TrimSuffix(name, ".disabled")
+		keepBlobs[vault.ObjectName(packID, base)] = true
+		keepBlobs[vault.ObjectName(packID, name)] = true
+		// SealFrom may store under "mods/<file>" relative paths.
+		keepBlobs[vault.ObjectName(packID, "mods/"+base)] = true
+		keepBlobs[vault.ObjectName(packID, "mods/"+name)] = true
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		low := strings.ToLower(name)
+		if strings.HasSuffix(low, vault.Ext) {
+			if keepBlobs[name] {
+				continue
+			}
+			_ = os.Remove(filepath.Join(modsDir, name))
+			continue
+		}
+		if !strings.HasSuffix(low, ".jar") && !strings.HasSuffix(low, ".jar.disabled") {
+			continue
+		}
+		if keep[name] {
+			continue
+		}
+		vault.Remove(modsDir, name, packID)
+		vault.Remove(filepath.Dir(modsDir), "mods/"+name, packID)
+	}
+	// Known filenames that may only exist as hashed vault blobs.
+	for name := range extraKnownRemovals() {
+		if keep[name] {
+			continue
+		}
+		vault.Remove(modsDir, name, packID)
+		vault.Remove(filepath.Dir(modsDir), "mods/"+name, packID)
+	}
+}
+
+func extraKnownRemovals() map[string]bool {
+	return map[string]bool{
+		"toms_storage-1.21-2.4.2.jar":                    true,
+		"createcontraptionterminals-1.21-1.4.0.jar":      true,
+		"createaddition-1.7.0.jar":                       true,
+		"create-new-age-1.2.0+neoforge-mc1.21.1.jar":     true,
 	}
 }
 

@@ -4,8 +4,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SSH_HOST="${PIXEL_SSH_HOST:-pixel}"
-VER="${1:-5.0.3}"
-NOTES="${2:-Beta 5.0.3: Discord RPC, ícono Pixel Play, canal beta.}"
+VER="${1:-5.0.5}"
+NOTES="${2:-Beta 5.0.5: pack 0.3.0, NeoForge alineado al survival y updater listo para testers.}"
 PUB_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 REMOTE_ROOT="/srv/dl/pixelplay/releases-v2-beta"
 PUBLIC="https://panel.pixelplay.gg/dl/pixelplay/releases-v2-beta"
@@ -47,9 +47,11 @@ ssh "$SSH_HOST" "mkdir -p \
   '${REMOTE_ROOT}/linux-x86_64/5.0.0' \
   '${REMOTE_ROOT}/linux-x86_64/5.0.1' \
   '${REMOTE_ROOT}/linux-x86_64/5.0.2' \
+  '${REMOTE_ROOT}/linux-x86_64/5.0.3' \
   '${REMOTE_ROOT}/linux-x86_64/latest' \
   '${REMOTE_ROOT}/windows-x86_64/${VER}' \
   '${REMOTE_ROOT}/windows-x86_64/5.0.2' \
+  '${REMOTE_ROOT}/windows-x86_64/5.0.3' \
   '${REMOTE_ROOT}/windows-x86_64/latest' \
   '${REMOTE_ROOT}/mac-arm/${VER}' \
   '${REMOTE_ROOT}/mac-arm/latest' \
@@ -65,6 +67,7 @@ scp -q "$TMP/linux.json" "$SSH_HOST:${REMOTE_ROOT}/linux-x86_64/latest/version.j
 scp -q "$TMP/linux.json" "$SSH_HOST:${REMOTE_ROOT}/linux-x86_64/5.0.0/version.json"
 scp -q "$TMP/linux.json" "$SSH_HOST:${REMOTE_ROOT}/linux-x86_64/5.0.1/version.json"
 scp -q "$TMP/linux.json" "$SSH_HOST:${REMOTE_ROOT}/linux-x86_64/5.0.2/version.json"
+scp -q "$TMP/linux.json" "$SSH_HOST:${REMOTE_ROOT}/linux-x86_64/5.0.3/version.json"
 
 echo "==> upload windows"
 scp -q "$WIN_BIN" "$SSH_HOST:${REMOTE_ROOT}/windows-x86_64/${VER}/pixelplay-launcher.exe"
@@ -72,6 +75,23 @@ ssh "$SSH_HOST" "chmod 755 '${REMOTE_ROOT}/windows-x86_64/${VER}/pixelplay-launc
 scp -q "$TMP/win.json" "$SSH_HOST:${REMOTE_ROOT}/windows-x86_64/${VER}/version.json"
 scp -q "$TMP/win.json" "$SSH_HOST:${REMOTE_ROOT}/windows-x86_64/latest/version.json"
 scp -q "$TMP/win.json" "$SSH_HOST:${REMOTE_ROOT}/windows-x86_64/5.0.2/version.json"
+scp -q "$TMP/win.json" "$SSH_HOST:${REMOTE_ROOT}/windows-x86_64/5.0.3/version.json"
+
+echo "==> backfill ALL beta version folders"
+ssh "$SSH_HOST" bash -s -- "$REMOTE_ROOT" <<'REMOTE'
+set -euo pipefail
+ROOT="$1"
+for plat in linux-x86_64 windows-x86_64; do
+  tip="$ROOT/$plat/latest/version.json"
+  [[ -f "$tip" ]] || continue
+  for d in "$ROOT/$plat"/*/; do
+    base="$(basename "$d")"
+    [[ "$base" == "latest" ]] && continue
+    cp -f "$tip" "$d/version.json"
+  done
+  echo "backfilled $plat"
+done
+REMOTE
 
 echo "==> landing /dl/beta"
 scp -q "$LINUX_BIN" "$SSH_HOST:${LANDING_DL}/pixelplay-launcher"

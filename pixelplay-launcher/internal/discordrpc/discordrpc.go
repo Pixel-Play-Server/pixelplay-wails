@@ -16,7 +16,6 @@ const (
 	defaultAppID = "1423767021371261038"
 	// Asset key already uploaded on the Pixel Play Discord application (same PNG as Tauri).
 	defaultLargeImage = "Square512x512Logo"
-	downloadPageURL   = "https://launcher.pixelplay.gg/dl/pixelplay-launcher"
 	discordInviteURL  = "https://discord.pixelplay.gg"
 	// Public copy of the same logo — Discord accepts https URLs as large_image.
 	publicLogoURL = "https://panel.pixelplay.gg/dl/pixelplay/branding/logo.png"
@@ -207,42 +206,32 @@ func (m *Manager) applyLocked(s State) error {
 		}
 	}
 
-	act := client.Activity{
-		LargeImage: large,
-		LargeText:  nonempty(m.largeTxt, "Pixel Play Launcher"),
-		Buttons: []*client.Button{
-			{Label: "Descargar launcher", Url: downloadPageURL},
-			{Label: "Discord", Url: discordInviteURL},
-		},
-		Timestamps: &client.Timestamps{Start: &start},
-	}
-
 	packOrProfile := nonempty(s.Pack, nonempty(s.Profile, "Minecraft"))
 	player := strings.TrimSpace(s.Player)
+	details := "Pixel Play Launcher"
+	state := idleLine(player, "En el menú")
 
 	switch strings.ToLower(s.Kind) {
 	case "idle", "inactivo":
-		act.Details = "Pixel Play Launcher"
-		act.State = idleLine(player, "En el menú")
+		// defaults
 	case "ingame", "in_game", "playing", "playing_game":
-		act.Details = truncate(fmt.Sprintf("Jugando · %s", packOrProfile), 128)
-		act.State = truncate(ingameLine(player, s.Server), 128)
+		details = truncate(fmt.Sprintf("Jugando · %s", packOrProfile), 128)
+		state = truncate(ingameLine(player, s.Server), 128)
 	case "launching", "starting":
-		act.Details = truncate(fmt.Sprintf("Iniciando · %s", packOrProfile), 128)
-		act.State = truncate(launchingLine(player, s.Version), 128)
+		details = truncate(fmt.Sprintf("Iniciando · %s", packOrProfile), 128)
+		state = truncate(launchingLine(player, s.Version), 128)
 	case "installing", "downloading":
-		act.Details = truncate(fmt.Sprintf("Instalando · %s", packOrProfile), 128)
-		act.State = truncate(nonempty(s.Version, nonempty(player, "Sincronizando contenido…")), 128)
+		details = truncate(fmt.Sprintf("Instalando · %s", packOrProfile), 128)
+		state = truncate(nonempty(s.Version, nonempty(player, "Sincronizando contenido…")), 128)
 	case "modal", "launcher":
-		act.Details = "Pixel Play Launcher"
-		section := friendlySection(s.Profile)
-		act.State = truncate(idleLine(player, section), 128)
+		details = "Pixel Play Launcher"
+		state = truncate(idleLine(player, friendlySection(s.Profile)), 128)
 	default:
-		act.Details = "Pixel Play Launcher"
-		act.State = truncate(nonempty(s.Kind, "En el menú"), 128)
+		details = "Pixel Play Launcher"
+		state = truncate(nonempty(s.Kind, "En el menú"), 128)
 	}
 
-	if err := client.SetActivity(act); err != nil {
+	if err := setDiscordActivity(details, state, large, nonempty(m.largeTxt, "Pixel Play Launcher"), start); err != nil {
 		log.Printf("[discord] set activity: %v", err)
 		m.loggedIn = false
 		m.sent = false

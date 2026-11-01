@@ -14,6 +14,7 @@ import (
 	"pixelplay-launcher/internal/httpx"
 	"pixelplay-launcher/internal/paths"
 	"pixelplay-launcher/internal/profiles"
+	"pixelplay-launcher/internal/redact"
 )
 
 func ListForProfile(profileID string) ([]string, error) {
@@ -61,12 +62,14 @@ func ReadFile(path string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return string(plain), nil
+		b = plain
 	}
-	return string(b), nil
+	gameDir := filepath.Dir(filepath.Dir(path))
+	return redact.Line(string(b), gameDir), nil
 }
 
 func UploadMCLogs(content string) (string, error) {
+	content = redact.Line(content)
 	var dest struct {
 		Success bool   `json:"success"`
 		ID      string `json:"id"`

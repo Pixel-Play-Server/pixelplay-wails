@@ -7,7 +7,7 @@ import (
 	"runtime"
 )
 
-// Desktop shows a native notification when possible (Linux: notify-send).
+// Desktop shows a native OS notification when possible.
 func Desktop(title, body string) {
 	switch runtime.GOOS {
 	case "linux":
@@ -28,6 +28,8 @@ func Desktop(title, body string) {
 	case "darwin":
 		script := fmt.Sprintf(`display notification %q with title %q`, body, title)
 		_ = exec.Command("osascript", "-e", script).Start()
+	case "windows":
+		desktopWindows(title, body)
 	default:
 		fmt.Fprintf(os.Stderr, "[notify] %s — %s\n", title, body)
 	}
@@ -37,7 +39,7 @@ func Desktop(title, body string) {
 func UpdateAvailable(from, to string) {
 	Desktop(
 		"Pixel Play — actualización",
-		fmt.Sprintf("Hay una nueva versión: %s → %s\nDescárgala desde el launcher.", from, to),
+		fmt.Sprintf("Hay una nueva versión: %s → %s. Abrí el launcher para descargarla.", from, to),
 	)
 }
 

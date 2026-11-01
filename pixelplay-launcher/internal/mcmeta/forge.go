@@ -51,8 +51,11 @@ func InstallForge(mcVersion, requested, javaBin string, emit Progress) (*LoaderI
 			meta.Libraries[i].URL = "https://maven.minecraftforge.net/"
 		}
 	}
-	if err := runInstallerClient(javaBin, installer, emit); err != nil && emit != nil {
-		emit("aviso instalador Forge: " + trimMsg(err.Error(), 240))
+	if err := EnsureVanillaLauncherLayout(mcVersion, emit); err != nil {
+		return nil, fmt.Errorf("preparar vanilla para Forge: %w", err)
+	}
+	if err := runInstallerClient(javaBin, installer, emit); err != nil {
+		return nil, fmt.Errorf("instalador Forge: %w", err)
 	}
 	_, _ = DownloadLibraries(meta, nil, emit)
 	ensureClientJar(meta.ID, mcVersion)

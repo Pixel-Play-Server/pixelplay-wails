@@ -5,10 +5,26 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"pixelplay-launcher/internal/paths"
 	"pixelplay-launcher/internal/profiles"
 )
+
+func skipUserData(rel string) bool {
+	rel = filepath.ToSlash(rel)
+	base := strings.ToLower(filepath.Base(rel))
+	switch base {
+	case "options.txt", "optionsof.txt", "servers.dat", "usercache.json", "usernamecache.json":
+		return true
+	}
+	for _, part := range []string{"/saves/", "/playerdata/", "/stats/", "/advancements/", "/screenshots/", "/replay_recordings/"} {
+		if strings.Contains("/"+rel+"/", part) {
+			return true
+		}
+	}
+	return false
+}
 
 func copyTree(src, dst string) error {
 	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
@@ -18,6 +34,9 @@ func copyTree(src, dst string) error {
 		rel, err := filepath.Rel(src, path)
 		if err != nil {
 			return err
+		}
+		if skipUserData(rel) {
+			return nil
 		}
 		target := filepath.Join(dst, rel)
 		if d.IsDir() {

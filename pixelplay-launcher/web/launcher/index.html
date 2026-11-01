@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pixel Play — Launcher 6.0.3 (FINAL)</title>
+  <meta name="description" content="Pixel Play 6.0.3: instalá el launcher oficial para Windows, Linux y macOS." />
+  <meta property="og:title" content="Pixel Play 6.0.3" />
+  <meta property="og:description" content="Instalador oficial del launcher Pixel Play." />
+  <meta property="og:type" content="website" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Pixelify+Sans:wght@500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #050705;
+      --green: #22c55e;
+      --bright: #4ade80;
+      --deep: #15803d;
+      --text: #f4f4f5;
+      --muted: #a1a1aa;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { min-height: 100%; }
+    body {
+      font-family: Outfit, ui-sans-serif, system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      overflow-x: hidden;
+    }
+    .grid {
+      position: fixed; inset: 0; pointer-events: none;
+      background-image:
+        linear-gradient(rgba(34,197,94,.07) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(34,197,94,.07) 1px, transparent 1px);
+      background-size: 48px 48px;
+      mask-image: radial-gradient(ellipse at 50% 20%, #000 20%, transparent 75%);
+    }
+    .glow {
+      position: fixed; width: 520px; height: 520px; border-radius: 50%;
+      background: radial-gradient(circle, rgba(34,197,94,.28), transparent 70%);
+      top: -160px; left: 50%; transform: translateX(-50%);
+      pointer-events: none; filter: blur(8px);
+    }
+    header {
+      position: relative; z-index: 2;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 22px 8vw;
+    }
+    .brand {
+      font-family: "Pixelify Sans", sans-serif;
+      font-size: 1.6rem; letter-spacing: .04em;
+      color: inherit; text-decoration: none;
+    }
+    .brand span { color: var(--green); }
+    nav a {
+      color: var(--muted); text-decoration: none; margin-left: 22px; font-weight: 500;
+    }
+    nav a:hover { color: #fff; }
+    .hero {
+      position: relative; z-index: 2;
+      padding: 8vh 8vw 4vh;
+      max-width: 1100px;
+    }
+    .pill {
+      display: inline-block;
+      border: 1px solid rgba(74,222,128,.4);
+      background: rgba(22,163,74,.12);
+      color: var(--bright);
+      font-size: .82rem;
+      padding: 6px 12px;
+      border-radius: 999px;
+      margin-bottom: 18px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    h1 {
+      font-family: "Pixelify Sans", sans-serif;
+      font-size: clamp(2.8rem, 8vw, 5.4rem);
+      line-height: .95;
+      margin-bottom: 18px;
+    }
+    h1 em {
+      font-style: normal;
+      color: var(--green);
+    }
+    .lead {
+      font-size: 1.2rem;
+      color: var(--muted);
+      max-width: 560px;
+      line-height: 1.55;
+      margin-bottom: 32px;
+    }
+    .downloads {
+      position: relative; z-index: 2;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 16px;
+      padding: 0 8vw 6vh;
+      max-width: 1100px;
+    }
+    .dl {
+      background: rgba(12,16,14,.9);
+      border: 1px solid rgba(255,255,255,.1);
+      padding: 22px 20px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      min-height: 190px;
+    }
+    .dl h2 {
+      font-family: "Pixelify Sans", sans-serif;
+      font-size: 1.45rem;
+      color: var(--bright);
+    }
+    .dl p { color: var(--muted); line-height: 1.45; font-size: .95rem; flex: 1; }
+    .dl .meta { font-size: .8rem; color: #71717a; letter-spacing: .04em; text-transform: uppercase; }
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      font-family: "Pixelify Sans", sans-serif;
+      font-size: 1.1rem;
+      padding: 12px 18px;
+      text-decoration: none;
+      border: 2px solid var(--green);
+      color: #04120a;
+      background: var(--green);
+      box-shadow: 0 5px 0 #166534, 0 12px 28px rgba(0,0,0,.45);
+      width: 100%;
+    }
+    .btn:hover { filter: brightness(1.08); transform: translateY(-1px); }
+    .btn.ghost {
+      background: transparent;
+      color: #fff;
+      box-shadow: 0 5px 0 rgba(0,0,0,.4);
+    }
+    .features {
+      position: relative; z-index: 2;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 18px;
+      padding: 2vh 8vw 10vh;
+    }
+    .card {
+      background: rgba(12,16,14,.86);
+      border: 1px solid rgba(255,255,255,.1);
+      padding: 22px 20px 24px;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
+    }
+    .card h3 {
+      font-family: "Pixelify Sans", sans-serif;
+      font-size: 1.35rem;
+      margin-bottom: 8px;
+      color: var(--bright);
+    }
+    .card p { color: var(--muted); line-height: 1.5; font-size: .98rem; }
+    footer {
+      position: relative; z-index: 2;
+      padding: 24px 8vw 40px;
+      color: var(--muted);
+      font-size: .9rem;
+      border-top: 1px solid rgba(255,255,255,.06);
+    }
+    footer a { color: var(--bright); }
+  </style>
+</head>
+<body>
+  <div class="grid"></div>
+  <div class="glow"></div>
+  <header>
+    <a class="brand" href="/">PIXEL <span>PLAY</span></a>
+    <nav>
+      <a href="/windows.html">windows</a>
+      <a href="/linux.html">linux</a>
+      <a href="/studio.html">pixel studio</a>
+      <a href="/beta.html">beta testers</a>
+      <a href="https://www.pixelplay.gg">server</a>
+    </nav>
+  </header>
+  <section class="hero">
+    <div class="pill">Build 16 · Pública · 6.0.3</div>
+    <h1>Jugá Minecraft<br />con el estilo <em>Pixel</em>.</h1>
+    <p class="lead">
+      ¡Horizon llegó a Pixel Play! Creá perfiles Horizon (26.3), instalá archivos .hmod,
+      seguí usando Fabric, Forge, NeoForge y tus packs .ppack. Build 16 pública para Windows y Linux.
+    </p>
+  </section>
+  <section class="downloads" aria-label="Descargas">
+    <article class="dl">
+      <div class="meta">Windows · x64</div>
+      <h2>Setup .exe</h2>
+      <p>Build 16 con Horizon y soporte .hmod. Instalación de usuario y actualizaciones automáticas.</p>
+      <a class="btn" href="/dl/PixelPlaySetup.exe">Descargar Windows</a>
+    </article>
+    <article class="dl">
+      <div class="meta">Linux · x86_64</div>
+      <h2>Binario</h2>
+      <p>Instalá con un comando o bajá el ejecutable. Guía copy-paste incluida.</p>
+      <a class="btn" href="/linux.html">Guía Linux</a>
+      <a class="btn ghost" href="/dl/pixelplay-launcher" style="margin-top:10px">Solo binario</a>
+    </article>
+    <article class="dl">
+      <div class="meta">macOS · Apple Silicon</div>
+      <h2>App .zip</h2>
+      <p>Build macOS anterior: Horizon está disponible por ahora en Windows y Linux.</p>
+      <a class="btn ghost" href="/dl/PixelPlay-mac-arm64.zip">Descargar macOS</a>
+    </article>
+  </section>
+  <section class="features">
+    <article class="card">
+      <h3>Packs .ppack</h3>
+      <p>Importá packs Pixel, políticas de autor y updates. Un archivo, un perfil.</p>
+    </article>
+    <article class="card">
+      <h3>Horizon + .hmod</h3>
+      <p>Motor Horizon nativo en Rust y mods .hmod en perfiles propios. Los mods Java siguen disponibles en sus loaders.</p>
+    </article>
+    <article class="card">
+      <h3>Login Microsoft</h3>
+      <p>Device code visible en el launcher: copiá el código, pegalo en microsoft.com/link, listo.</p>
+    </article>
+    <article class="card">
+      <h3>Pixel Studio</h3>
+      <p>Armá y publicá packs .ppack con MCP vivo. Linux y Windows, listo para descargar.</p>
+    </article>
+  </section>
+  <footer>
+    Pixel Play 6.0.3 —
+    <a href="https://www.pixelplay.gg">pixelplay.gg</a> ·
+    <a href="https://panel.pixelplay.gg/dl/pixelplay/releases-v2/windows-x86_64/6.0.3/pixelplay-launcher-amd64-installer.exe">mirror Windows</a> ·
+    <a href="https://panel.pixelplay.gg/dl/pixelplay/releases-v2/linux-x86_64/6.0.3/pixelplay-launcher">mirror Linux</a>
+  </footer>
+</body>
+</html>

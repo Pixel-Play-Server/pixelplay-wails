@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Instalar Pixel Play en Linux</title>
+  <meta name="description" content="Guía de instalación del launcher Pixel Play en Linux con comandos copy-paste." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Pixelify+Sans:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #050705;
+      --green: #22c55e;
+      --bright: #4ade80;
+      --text: #f4f4f5;
+      --muted: #a1a1aa;
+      --card: rgba(12,16,14,.92);
+      --border: rgba(255,255,255,.1);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: Outfit, ui-sans-serif, system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100%;
+    }
+    .grid {
+      position: fixed; inset: 0; pointer-events: none;
+      background-image:
+        linear-gradient(rgba(34,197,94,.07) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(34,197,94,.07) 1px, transparent 1px);
+      background-size: 48px 48px;
+      mask-image: radial-gradient(ellipse at 50% 10%, #000 25%, transparent 75%);
+    }
+    .wrap { position: relative; z-index: 2; max-width: 820px; margin: 0 auto; padding: 28px 6vw 72px; }
+    header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 36px; }
+    .brand {
+      font-family: "Pixelify Sans", sans-serif;
+      font-size: 1.4rem; color: inherit; text-decoration: none; letter-spacing: .04em;
+    }
+    .brand span { color: var(--green); }
+    header a.nav { color: var(--muted); text-decoration: none; }
+    header a.nav:hover { color: #fff; }
+    .pill {
+      display: inline-block; border: 1px solid rgba(74,222,128,.4);
+      background: rgba(22,163,74,.12); color: var(--bright);
+      font-size: .78rem; padding: 5px 10px; border-radius: 999px;
+      letter-spacing: .08em; text-transform: uppercase; margin-bottom: 14px;
+    }
+    h1 {
+      font-family: "Pixelify Sans", sans-serif;
+      font-size: clamp(2rem, 6vw, 3.2rem);
+      line-height: 1.05; margin-bottom: 12px;
+    }
+    h1 em { font-style: normal; color: var(--green); }
+    .lead { color: var(--muted); font-size: 1.1rem; line-height: 1.55; margin-bottom: 28px; max-width: 36rem; }
+    h2 {
+      font-family: "Pixelify Sans", sans-serif;
+      font-size: 1.45rem; color: var(--bright); margin: 28px 0 10px;
+    }
+    p, li { color: var(--muted); line-height: 1.55; }
+    ol { padding-left: 1.2rem; margin-bottom: 12px; }
+    li { margin: 6px 0; }
+    .card {
+      background: var(--card); border: 1px solid var(--border);
+      padding: 18px 16px 16px; margin: 14px 0 22px;
+    }
+    .cmd-wrap { position: relative; }
+    pre {
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+      font-size: .92rem; line-height: 1.45;
+      background: #0a0f0c; border: 1px solid rgba(74,222,128,.22);
+      color: #e7ffe9; padding: 14px 16px; overflow-x: auto;
+      white-space: pre-wrap; word-break: break-word;
+    }
+    button.copy {
+      margin-top: 10px;
+      font-family: "Pixelify Sans", sans-serif;
+      font-size: 1rem;
+      padding: 10px 14px;
+      border: 2px solid var(--green);
+      background: var(--green);
+      color: #04120a;
+      cursor: pointer;
+      box-shadow: 0 4px 0 #166534;
+    }
+    button.copy:hover { filter: brightness(1.06); }
+    button.copy.done { background: transparent; color: var(--bright); }
+    .note {
+      font-size: .92rem; color: var(--muted);
+      border-left: 3px solid var(--green); padding-left: 12px; margin: 10px 0 0;
+    }
+    a { color: var(--bright); }
+    footer { margin-top: 40px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,.06); font-size: .9rem; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="grid"></div>
+  <div class="wrap">
+    <header>
+      <a class="brand" href="/">PIXEL <span>PLAY</span></a>
+      <a class="nav" href="/">← descargas</a>
+    </header>
+
+    <div class="pill">Linux · x86_64</div>
+    <h1>Instalá el launcher<br />en <em>un comando</em>.</h1>
+    <p class="lead">
+      Copiá, pegá en la terminal y listo. El script baja el binario, lo deja en
+      <code>~/.local</code> y crea el acceso en el menú de aplicaciones.
+    </p>
+
+    <h2>1 · Instalación rápida</h2>
+    <div class="card">
+      <div class="cmd-wrap">
+        <pre id="cmd-install">curl -fsSL https://launcher.pixelplay.gg/dl/install-linux.sh | bash</pre>
+        <button type="button" class="copy" data-target="cmd-install">Copiar comando</button>
+      </div>
+      <p class="note">Después abrí <strong>Pixel Play</strong> desde el menú, o corré <code>pixelplay-launcher</code>.</p>
+    </div>
+
+    <h2>2 · Dependencias (si no abre)</h2>
+    <p>El launcher usa WebKitGTK. Si falla al iniciar, instalá esto según tu distro:</p>
+
+    <h2 style="font-size:1.15rem;margin-top:18px">Ubuntu / Debian / Linux Mint / Pop!_OS</h2>
+    <div class="card">
+      <pre id="cmd-apt">sudo apt update
+sudo apt install -y curl libwebkit2gtk-4.1-0 libgtk-3-0</pre>
+      <button type="button" class="copy" data-target="cmd-apt">Copiar comando</button>
+      <p class="note">Si no encuentra <code>libwebkit2gtk-4.1-0</code>, probá <code>libwebkit2gtk-4.0-37</code>.</p>
+    </div>
+
+    <h2 style="font-size:1.15rem">Fedora</h2>
+    <div class="card">
+      <pre id="cmd-dnf">sudo dnf install -y curl webkit2gtk4.1 gtk3</pre>
+      <button type="button" class="copy" data-target="cmd-dnf">Copiar comando</button>
+    </div>
+
+    <h2 style="font-size:1.15rem">Arch / EndeavourOS / Manjaro</h2>
+    <div class="card">
+      <pre id="cmd-pacman">sudo pacman -Syu --needed curl webkit2gtk-4.1 gtk3</pre>
+      <button type="button" class="copy" data-target="cmd-pacman">Copiar comando</button>
+    </div>
+
+    <h2>3 · Instalación manual (paso a paso)</h2>
+    <div class="card">
+      <ol>
+        <li>Crear carpeta e instalar el binario</li>
+      </ol>
+      <pre id="cmd-manual">mkdir -p ~/.local/share/pixelplay ~/.local/bin
+curl -fL -o ~/.local/share/pixelplay/pixelplay-launcher \
+  https://launcher.pixelplay.gg/dl/pixelplay-launcher
+chmod +x ~/.local/share/pixelplay/pixelplay-launcher
+ln -sfn ~/.local/share/pixelplay/pixelplay-launcher ~/.local/bin/pixelplay-launcher</pre>
+      <button type="button" class="copy" data-target="cmd-manual">Copiar comando</button>
+      <ol start="2" style="margin-top:16px">
+        <li>Abrir</li>
+      </ol>
+      <pre id="cmd-run">pixelplay-launcher
+# o:
+~/.local/share/pixelplay/pixelplay-launcher</pre>
+      <button type="button" class="copy" data-target="cmd-run">Copiar comando</button>
+      <p class="note">Asegurate de tener <code>~/.local/bin</code> en tu <code>PATH</code> (en la mayoría de distros modernas ya está).</p>
+    </div>
+
+    <h2>4 · Actualizar</h2>
+    <div class="card">
+      <p>Desde el launcher: debería ofrecer update solo (drop-in del binario).</p>
+      <p style="margin-top:10px">O volvé a correr el instalador:</p>
+      <pre id="cmd-update">curl -fsSL https://launcher.pixelplay.gg/dl/install-linux.sh | bash</pre>
+      <button type="button" class="copy" data-target="cmd-update">Copiar comando</button>
+    </div>
+
+    <h2>5 · Desinstalar</h2>
+    <div class="card">
+      <pre id="cmd-rm">rm -f ~/.local/bin/pixelplay-launcher \
+  ~/.local/share/pixelplay/pixelplay-launcher \
+  ~/.local/share/applications/pixelplay-launcher.desktop \
+  ~/Desktop/pixelplay-launcher.desktop
+# datos del juego/launcher (opcional):
+# rm -rf ~/.local/share/pixelplayclientv3</pre>
+      <button type="button" class="copy" data-target="cmd-rm">Copiar comando</button>
+    </div>
+
+    <footer>
+      Pixel Play Linux —
+      <a href="/">descargas</a> ·
+      <a href="https://www.pixelplay.gg">pixelplay.gg</a> ·
+      <a href="https://discord.pixelplay.gg">Discord</a>
+    </footer>
+  </div>
+  <script>
+    document.querySelectorAll("button.copy").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const el = document.getElementById(btn.dataset.target);
+        const text = el ? el.textContent : "";
+        try {
+          await navigator.clipboard.writeText(text);
+          const prev = btn.textContent;
+          btn.textContent = "Copiado ✓";
+          btn.classList.add("done");
+          setTimeout(() => {
+            btn.textContent = prev;
+            btn.classList.remove("done");
+          }, 1600);
+        } catch (e) {
+          btn.textContent = "Seleccioná y copiá (Ctrl+C)";
+        }
+      });
+    });
+  </script>
+</body>
+</html>

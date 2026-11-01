@@ -34,6 +34,18 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, "index.html"),
       },
+      output: {
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return undefined;
+          if (/[\\/]ogl[\\/]/.test(id)) return "vendor-ogl";
+          if (/[\\/](three|@react-three|skinview3d|@flasham)[\\/]/.test(id)) return "vendor-3d";
+          if (/[\\/](react-markdown|remark-|rehype-|micromark|mdast-|hast-|unified|vfile)/.test(id)) return "vendor-markdown";
+          if (/[\\/](react|react-dom|react-router|react-router-dom|scheduler)[\\/]/.test(id)) return "vendor-react";
+          if (/[\\/](i18next|react-i18next|i18next-[^/\\]+)[\\/]/.test(id)) return "vendor-i18n";
+          if (/[\\/](gsap|date-fns|flagsmith|@iconify)[\\/]/.test(id)) return "vendor-misc";
+          return "vendor";
+        },
+      },
     },
   },
 });

@@ -14,12 +14,13 @@ import (
 	"pixelplay-launcher/internal/auth"
 	"pixelplay-launcher/internal/capes"
 	"pixelplay-launcher/internal/capetemplates"
-	"pixelplay-launcher/internal/featured"
 	"pixelplay-launcher/internal/config"
 	"pixelplay-launcher/internal/content"
 	"pixelplay-launcher/internal/curseforge"
 	"pixelplay-launcher/internal/discordrpc"
 	"pixelplay-launcher/internal/download"
+	"pixelplay-launcher/internal/featured"
+	"pixelplay-launcher/internal/horizon"
 	"pixelplay-launcher/internal/httpx"
 	"pixelplay-launcher/internal/java"
 	"pixelplay-launcher/internal/launch"
@@ -27,6 +28,8 @@ import (
 	"pixelplay-launcher/internal/mcmeta"
 	"pixelplay-launcher/internal/modpackupdate"
 	"pixelplay-launcher/internal/modrinth"
+	"pixelplay-launcher/internal/mrpack"
+	"pixelplay-launcher/internal/notify"
 	"pixelplay-launcher/internal/osopen"
 	"pixelplay-launcher/internal/packs"
 	"pixelplay-launcher/internal/paths"
@@ -37,6 +40,7 @@ import (
 	"pixelplay-launcher/internal/unified"
 	"pixelplay-launcher/internal/updater"
 	"pixelplay-launcher/internal/vanillacapes"
+	"pixelplay-launcher/internal/vcredist"
 	"pixelplay-launcher/internal/version"
 	"pixelplay-launcher/internal/worlds"
 )
@@ -49,6 +53,8 @@ type Runtime struct {
 	OpenURL         func(url string)
 	PickFile        func(title, filter string) (string, error)
 	PickFiles       func(title, filter string) ([]string, error)
+	PickDir         func(title string) (string, error)
+	SaveFile        func(title, suggested, filter string) (string, error)
 }
 
 // Dispatch routes Tauri-compatible command names to Go handlers.
@@ -63,6 +69,11 @@ func Dispatch(rt *Runtime, cmd string, argsJSON string) (any, error) {
 		if rt != nil && rt.Emit != nil {
 			rt.Emit(event, payload)
 		}
+	}
+
+	switch cmd {
+	case "set_active_account", "remove_account", "login_pixel_account", "reserve_pixel_account":
+		defer reconnectSocial()
 	}
 
 	switch cmd {
@@ -107,6 +118,30 @@ func Dispatch(rt *Runtime, cmd string, argsJSON string) (any, error) {
 		}
 		return out, nil
 
+	case "install_horizon_mod":
+		id, err := argString(args, "profileId", "profile_id")
+		if err != nil {
+			return nil, err
+		}
+		source, err := argString(args, "source")
+		if err != nil {
+			return nil, err
+		}
+		raw, err := profiles.RawGet(id)
+		if err != nil {
+			return nil, err
+		}
+		var p struct {
+			Path    string `json:"path"`
+			Horizon bool   `json:"horizon_runtime"`
+		}
+		if err = json.Unmarshal(raw, &p); err != nil {
+			return nil, err
+		}
+		if !p.Horizon || p.Path == "" || filepath.IsAbs(p.Path) || filepath.Clean(p.Path) == ".." || strings.HasPrefix(filepath.Clean(p.Path), ".."+string(filepath.Separator)) {
+			return nil, fmt.Errorf("se requiere un perfil Horizon válido")
+		}
+		return horizon.InstallMod(paths.ProfileDir(p.Path), source)
 	case "create_profile":
 		params := map[string]any{}
 		_ = json.Unmarshal([]byte(argsJSON), &params)
@@ -183,6 +218,50 @@ func Dispatch(rt *Runtime, cmd string, argsJSON string) (any, error) {
 
 	case "get_launcher_directory", "get_data_dir":
 		return paths.DataDir(), nil
+
+	case "pick_file", "plugin_dialog_open":
+		title, _ := argString(args, "title")
+		filter, _ := argString(args, "filter")
+		if filter == "" {
+			filter = "*.ppack;*.pixelplaypack;*.mrpack;*.zip"
+		}
+		if title == "" {
+			title = "Seleccionar archivo"
+		}
+		if rt == nil || rt.PickFile == nil {
+			return "", fmt.Errorf("sin diálogo de archivos")
+		}
+		return rt.PickFile(title, filter)
+
+	case "pick_files":
+		title, _ := argString(args, "title")
+		filter, _ := argString(args, "filter")
+		if rt == nil || rt.PickFiles == nil {
+			return nil, fmt.Errorf("sin diálogo de archivos")
+		}
+		return rt.PickFiles(title, filter)
+
+	case "pick_directory":
+		title, _ := argString(args, "title")
+		if title == "" {
+			title = "Seleccionar carpeta"
+		}
+		if rt == nil || rt.PickDir == nil {
+			return "", fmt.Errorf("sin diálogo de carpetas")
+		}
+		return rt.PickDir(title)
+
+	case "save_file", "plugin_dialog_save":
+		title, _ := argString(args, "title")
+		suggested, _ := argString(args, "defaultPath", "default_path", "suggested")
+		filter, _ := argString(args, "filter")
+		if filter == "" {
+			filter = "*.ppack"
+		}
+		if rt == nil || rt.SaveFile == nil {
+			return "", fmt.Errorf("sin diálogo de guardar")
+		}
+		return rt.SaveFile(title, suggested, filter)
 
 	case "open_profile_folder":
 		id, err := argString(args, "profileId", "profile_id")
@@ -294,6 +373,34 @@ func Dispatch(rt *Runtime, cmd string, argsJSON string) (any, error) {
 		}()
 		return map[string]any{"downloaded": true, "path": path, "version": man.Version, "restarting": true}, nil
 
+	case "install_vcredist", "repair_vcredist":
+		path, err := vcredist.LaunchSetup(nil)
+		if err != nil {
+			return nil, err
+		}
+		emit("vcredist_required", map[string]any{
+			"url":     vcredist.RedistURL,
+			"message": vcredist.PopupMessage,
+			"title":   "Instalá Visual C++",
+			"path":    path,
+		})
+		return map[string]any{
+			"ok":      true,
+			"path":    path,
+			"url":     vcredist.RedistURL,
+			"message": vcredist.PopupMessage,
+			"present": vcredist.Present(),
+		}, nil
+	case "dismiss_vcredist":
+		vcredist.MarkAcknowledged()
+		return map[string]any{"ok": true, "present": vcredist.Present()}, nil
+	case "vcredist_status":
+		return map[string]any{
+			"present":      vcredist.Present(),
+			"acknowledged": vcredist.Acknowledged(),
+			"url":          vcredist.RedistURL,
+		}, nil
+
 	case "backend_info":
 		return map[string]string{
 			"engine":        "wails+go",
@@ -304,6 +411,9 @@ func Dispatch(rt *Runtime, cmd string, argsJSON string) (any, error) {
 		}, nil
 
 	case "get_all_profiles_and_last_played":
+		if list, err := profiles.List(); err == nil && len(list) == 0 {
+			_, _ = featured.EnsureDefaultProfile()
+		}
 		raw, err := profiles.RawList()
 		if err != nil {
 			return nil, err
@@ -332,7 +442,7 @@ func Dispatch(rt *Runtime, cmd string, argsJSON string) (any, error) {
 		if acc == nil {
 			return nil, nil
 		}
-		if !acc.Offline() {
+		if !acc.Offline() || acc.PixelPasswordAccount() {
 			if updated, err := auth.EnsurePixelplay(*acc); err == nil {
 				acc = &updated
 			}
@@ -350,7 +460,7 @@ func Dispatch(rt *Runtime, cmd string, argsJSON string) (any, error) {
 		if err != nil || acc == nil {
 			return nil, err
 		}
-		if !acc.Offline() {
+		if !acc.Offline() || acc.PixelPasswordAccount() {
 			if updated, err := auth.EnsurePixelplay(*acc); err == nil {
 				acc = &updated
 			}
@@ -362,6 +472,20 @@ func Dispatch(rt *Runtime, cmd string, argsJSON string) (any, error) {
 			return nil, err
 		}
 		return nil, accounts.Remove(id)
+	case "login_pixel_account":
+		user, err := argString(args, "username", "name")
+		if err != nil {
+			return nil, err
+		}
+		pass, err := argString(args, "password", "clave")
+		if err != nil {
+			return nil, err
+		}
+		creds, err := auth.LoginPixel(user, pass)
+		if err != nil {
+			return nil, err
+		}
+		return creds.ForUI(), nil
 	case "create_offline_account":
 		user, err := argString(args, "username", "name")
 		if err != nil {
@@ -372,6 +496,105 @@ func Dispatch(rt *Runtime, cmd string, argsJSON string) (any, error) {
 			return nil, err
 		}
 		return creds.ForUI(), nil
+	case "lookup_pixel_account":
+		user, err := argString(args, "username", "name")
+		if err != nil {
+			return nil, err
+		}
+		look, err := auth.LookupPixel(user)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{
+			"exists":   look.Exists,
+			"username": look.Username,
+			"kind":     look.Kind,
+			"rank":     look.Rank,
+		}, nil
+	case "reserve_pixel_account":
+		user, err := argString(args, "username", "name")
+		if err != nil {
+			return nil, err
+		}
+		pass, err := argString(args, "password", "clave")
+		if err != nil {
+			return nil, err
+		}
+		creds, err := auth.ReservePixel(user, pass)
+		if err != nil {
+			return nil, err
+		}
+		return creds.ForUI(), nil
+	case "list_survival_board":
+		sort, _ := argString(args, "sort")
+		return auth.ListSurvivalBoard(sort)
+	case "get_survival_player":
+		user, err := argString(args, "username", "name", "player")
+		if err != nil {
+			return nil, err
+		}
+		return auth.GetSurvivalPlayer(user)
+	case "list_friends":
+		return auth.ListFriends()
+	case "add_friend":
+		user, err := argString(args, "username", "name")
+		if err != nil {
+			return nil, err
+		}
+		return auth.AddFriend(user)
+	case "remove_friend":
+		user, err := argString(args, "username", "name")
+		if err != nil {
+			return nil, err
+		}
+		if err := auth.RemoveFriend(user); err != nil {
+			return nil, err
+		}
+		return map[string]any{"ok": true}, nil
+	case "accept_friend":
+		user, err := argString(args, "username", "name")
+		if err != nil {
+			return nil, err
+		}
+		return auth.AcceptFriend(user)
+	case "decline_friend":
+		user, err := argString(args, "username", "name")
+		if err != nil {
+			return nil, err
+		}
+		if err := auth.DeclineFriend(user); err != nil {
+			return nil, err
+		}
+		return map[string]any{"ok": true}, nil
+	case "cancel_friend":
+		user, err := argString(args, "username", "name")
+		if err != nil {
+			return nil, err
+		}
+		if err := auth.CancelFriend(user); err != nil {
+			return nil, err
+		}
+		return map[string]any{"ok": true}, nil
+	case "social_status", "social_send", "social_history", "social_unread", "social_read",
+		"social_typing", "social_call", "social_accept", "social_hangup", "social_mute", "social_deafen",
+		"social_webrtc", "social_pcm_fallback", "social_mic_level", "social_native_start", "social_native_command", "social_native_stop", "social_native_devices":
+		return socialCommand(cmd, args)
+	case "desktop_notify":
+		title, _ := argString(args, "title")
+		body, _ := argString(args, "body", "message")
+		if title == "" {
+			title = "Pixel Play"
+		}
+		notify.Desktop(title, body)
+		return map[string]any{"ok": true}, nil
+	case "refresh_pixel_profile":
+		return auth.RefreshPixelProfile()
+	case "set_presence":
+		status, _ := argString(args, "status")
+		if status == "" {
+			status = "online"
+		}
+		return auth.SetActivePresence(status)
 	case "create_offline_account_with_id":
 		user, err := argString(args, "username", "name")
 		if err != nil {
@@ -475,11 +698,11 @@ func Dispatch(rt *Runtime, cmd string, argsJSON string) (any, error) {
 				if err != nil {
 					break
 				}
-				b, err := os.ReadFile(filepath.Join(paths.ProfileDir(sum.Path), "logs", "latest.log"))
+				b, err := logs.ReadFile(filepath.Join(paths.ProfileDir(sum.Path), "logs", "latest.log"))
 				if err != nil {
 					return "", nil
 				}
-				return string(b), nil
+				return b, nil
 			}
 		}
 		return "", nil
@@ -682,7 +905,7 @@ func Dispatch(rt *Runtime, cmd string, argsJSON string) (any, error) {
 	case "get_standard_profiles":
 		return map[string]any{"profiles": []any{}}, nil
 	case "refresh_standard_versions":
-		return nil, nil
+		return []any{}, nil
 	case "set_blocked_mods_config", "log_message_command":
 		return nil, nil
 	case "get_news_and_changelogs_command":
@@ -777,15 +1000,20 @@ func Dispatch(rt *Runtime, cmd string, argsJSON string) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		logPath := filepath.Join(paths.ProfileDir(p.Path), "logs", "latest.log")
-		b, err := os.ReadFile(logPath)
-		if err != nil {
-			return "", nil
+		if content, err := logs.LatestForProfile(id); err == nil {
+			return content, nil
 		}
-		return string(b), nil
+		logPath := filepath.Join(paths.ProfileDir(p.Path), "logs", "latest.log")
+		return logs.ReadFile(logPath)
 	case "get_profile_directory_structure":
 		id, err := argString(args, "profileId", "profile_id")
 		if err != nil {
+			return nil, err
+		}
+		if err := protect.AssertProfileFolderOpenable(id); err != nil {
+			if rt != nil && rt.OnAuthorBlocked != nil {
+				rt.OnAuthorBlocked("ver carpetas del cliente")
+			}
 			return nil, err
 		}
 		p, err := profiles.Get(id)
@@ -801,10 +1029,22 @@ func Dispatch(rt *Runtime, cmd string, argsJSON string) (any, error) {
 		if err != nil {
 			return nil, err
 		}
+		if err := protect.AssertPathOpenable(fp); err != nil {
+			if rt != nil && rt.OnAuthorBlocked != nil {
+				rt.OnAuthorBlocked("modificar archivos del pack")
+			}
+			return nil, err
+		}
 		return nil, content.SetEnabled(fp, argBool(args, true, "enabled"))
 	case "delete_file":
 		fp, err := argString(args, "filePath", "file_path")
 		if err != nil {
+			return nil, err
+		}
+		if err := protect.AssertPathOpenable(fp); err != nil {
+			if rt != nil && rt.OnAuthorBlocked != nil {
+				rt.OnAuthorBlocked("borrar archivos del pack")
+			}
 			return nil, err
 		}
 		return nil, content.Delete(fp)
@@ -1098,18 +1338,14 @@ func Dispatch(rt *Runtime, cmd string, argsJSON string) (any, error) {
 	case "get_user_skin_data":
 		tok, _ := argString(args, "accessToken", "access_token")
 		uid, _ := argString(args, "uuid", "id")
-		if tok == "" && uid == "" {
-			return nil, fmt.Errorf("falta accessToken o uuid")
-		}
-		return skins.UserProfile(tok, uid)
+		name, _ := argString(args, "username", "name")
+		return skins.UserProfile(tok, uid, name)
 	case "upload_skin":
-		tok, err := argString(args, "accessToken", "access_token")
-		if err != nil {
-			return nil, err
-		}
+		tok, _ := argString(args, "accessToken", "access_token")
 		variant, _ := argString(args, "skinVariant", "skin_variant", "variant")
 		fp, _ := argString(args, "path", "filePath")
 		if fp == "" && rt != nil && rt.PickFile != nil {
+			var err error
 			fp, err = rt.PickFile("Skin PNG", "*.png")
 			if err != nil || fp == "" {
 				return nil, err
@@ -1121,16 +1357,10 @@ func Dispatch(rt *Runtime, cmd string, argsJSON string) (any, error) {
 		}
 		return nil, skins.ApplyPNG(tok, variant, b)
 	case "reset_skin":
-		tok, err := argString(args, "accessToken", "access_token")
-		if err != nil {
-			return nil, err
-		}
+		tok, _ := argString(args, "accessToken", "access_token")
 		return nil, skins.Reset(tok)
 	case "apply_skin_from_base64":
-		tok, err := argString(args, "accessToken", "access_token")
-		if err != nil {
-			return nil, err
-		}
+		tok, _ := argString(args, "accessToken", "access_token")
 		b64, err := argString(args, "base64Data", "base64_data")
 		if err != nil {
 			return nil, err
@@ -1272,7 +1502,12 @@ func Dispatch(rt *Runtime, cmd string, argsJSON string) (any, error) {
 	case "upload_profile_images":
 		return "", nil
 	case "download_and_install_modrinth_modpack":
-		return "", fmt.Errorf("instalá el .mrpack desde PixelModpack Studio o importá un .ppack")
+		dl, err := argString(args, "downloadUrl", "download_url")
+		if err != nil || strings.TrimSpace(dl) == "" {
+			return "", fmt.Errorf("falta downloadUrl del .mrpack")
+		}
+		fname, _ := argString(args, "fileName", "file_name")
+		return mrpack.DownloadAndInstall(dl, fname)
 	case "switch_content_version", "switch_modpack_version_command":
 		return map[string]any{"versions": []any{}}, nil
 
@@ -1289,6 +1524,9 @@ func Dispatch(rt *Runtime, cmd string, argsJSON string) (any, error) {
 		}
 		m, err := packs.ImportPPackFile(fp)
 		if err != nil {
+			if profiles.ZipHasProfileJSON(fp) {
+				return nil, fmt.Errorf("este archivo es un perfil exportado (profile.json), no un pack de Studio (manifest.json). Importalo desde Perfiles → Importar")
+			}
 			return nil, err
 		}
 		return m, nil
@@ -1300,6 +1538,35 @@ func Dispatch(rt *Runtime, cmd string, argsJSON string) (any, error) {
 		}
 		return packs.PolicyFor(id)
 
+	case "modpack_updater_status":
+		id, err := argString(args, "packId", "pack_id", "id")
+		if err != nil {
+			return nil, err
+		}
+		up, cur, err := packs.UpdaterFor(id)
+		if err != nil {
+			return map[string]any{"has_updater": false, "current": ""}, nil
+		}
+		if up == nil || strings.TrimSpace(up.URL) == "" {
+			return map[string]any{"has_updater": false, "current": cur}, nil
+		}
+		man, newer, err := modpackupdate.Check(cur, up.URL)
+		out := map[string]any{
+			"has_updater": true,
+			"current":     cur,
+			"remote":      "",
+			"updated":     nil,
+		}
+		if err != nil {
+			out["error"] = err.Error()
+			return out, nil
+		}
+		if man != nil {
+			out["remote"] = man.Version
+		}
+		out["updated"] = !newer
+		return out, nil
+
 	case "check_modpack_updates":
 		id, err := argString(args, "packId", "pack_id", "id")
 		if err != nil {
@@ -1308,6 +1575,9 @@ func Dispatch(rt *Runtime, cmd string, argsJSON string) (any, error) {
 		up, cur, err := packs.UpdaterFor(id)
 		if err != nil {
 			return nil, err
+		}
+		if up == nil || strings.TrimSpace(up.URL) == "" {
+			return map[string]any{"available": false, "current": cur, "endpoint": ""}, nil
 		}
 		man, newer, err := modpackupdate.Check(cur, up.URL)
 		if err != nil {
@@ -1395,6 +1665,29 @@ func Dispatch(rt *Runtime, cmd string, argsJSON string) (any, error) {
 			return nil, err
 		}
 		return logs.UploadMCLogs(contentStr)
+
+	case "upload_client_log_command":
+		payload := payloadMap(args)
+		profileID, _ := argString(payload, "profileId", "profile_id")
+		exit := argIntPtr(payload, "exitCode", "exit_code")
+		logContent, _ := argString(payload, "logContent", "log_content", "latest_log")
+		crashContent, _ := argString(payload, "crashReport", "crash_report", "crash_report_content")
+		mcName, _ := argString(payload, "mcName", "mc_name", "accountName", "account_name")
+		profileName, _ := argString(payload, "profileName", "profile_name")
+		pack, _ := argString(payload, "pack", "pixelplay_pack")
+		ver, _ := argString(payload, "minecraftVersion", "minecraft_version")
+		loader, _ := argString(payload, "loader", "modloader")
+		if acc, err := accounts.Active(); err == nil && acc != nil && mcName == "" {
+			mcName = acc.Username
+		}
+		return logs.UploadForProfile(profileID, logs.UploadMeta{
+			MCName:           mcName,
+			ProfileName:      profileName,
+			Pack:             pack,
+			MinecraftVersion: ver,
+			Loader:           loader,
+			ExitCode:         exit,
+		}, logs.Snapshot{LatestLog: logContent, CrashReport: crashContent})
 
 	case "get_image_preview":
 		payload := payloadMap(args)
@@ -1583,6 +1876,30 @@ func argIntPtr(args map[string]json.RawMessage, keys ...string) *int {
 	return nil
 }
 
+func argInt64(args map[string]json.RawMessage, keys ...string) (int64, error) {
+	for _, key := range keys {
+		raw, ok := args[key]
+		if !ok {
+			continue
+		}
+		var n int64
+		if json.Unmarshal(raw, &n) == nil {
+			return n, nil
+		}
+		var f float64
+		if json.Unmarshal(raw, &f) == nil {
+			return int64(f), nil
+		}
+		var s string
+		if json.Unmarshal(raw, &s) == nil {
+			if parsed, err := strconv.ParseInt(s, 10, 64); err == nil {
+				return parsed, nil
+			}
+		}
+	}
+	return 0, nil
+}
+
 func primaryModrinthFile(raw json.RawMessage) (url, name string) {
 	var v struct {
 		Files []struct {
@@ -1654,29 +1971,48 @@ func dirNode(name, path string, depth int) map[string]any {
 
 func importPackAsProfile(fp string) (string, error) {
 	low := strings.ToLower(fp)
-	if strings.HasSuffix(low, ".mrpack") {
-		return "", fmt.Errorf("instalá el .mrpack desde PixelModpack Studio o convertí a .ppack")
+	switch {
+	case strings.HasSuffix(low, ".mrpack"):
+		// .mrpack = Modrinth estándar; Pixel Studio es solo para .ppack.
+		return mrpack.ImportFile(fp)
+	case strings.HasSuffix(low, ".ppack"), strings.HasSuffix(low, ".pixelplaypack"):
+		// Studio = manifest.json; export de perfil del launcher = profile.json
+		// (antes el export usaba extensión .ppack por error).
+		if profiles.ZipHasProfileJSON(fp) {
+			return profiles.ImportFromZip(fp)
+		}
+		m, err := packs.ImportPPackFile(fp)
+		if err != nil {
+			return "", err
+		}
+		name := m.DisplayName
+		if name == "" {
+			name = m.ID
+		}
+		gv := m.GameVersion
+		if gv == "" {
+			gv = "1.21.1"
+		}
+		loader := m.Loader
+		if loader == "" {
+			loader = "neoforge"
+		}
+		return profiles.Create(map[string]any{
+			"name":                       name,
+			"game_version":               gv,
+			"loader":                     loader,
+			"selected_pixelplay_pack_id": m.ID,
+		})
+	case strings.HasSuffix(low, ".zip"):
+		// CurseForge zip or generic — try CurseForge first, then treat as unknown.
+		if id, err := curseforge.ImportPack(fp); err == nil {
+			return id, nil
+		}
+		if profiles.ZipHasProfileJSON(fp) {
+			return profiles.ImportFromZip(fp)
+		}
+		return "", fmt.Errorf("zip no reconocido: usá .mrpack (Modrinth), .ppack (Pixel Studio) o .pixelplaypack (perfil)")
+	default:
+		return "", fmt.Errorf("formato no soportado (usá .mrpack, .ppack, .pixelplaypack o zip de CurseForge)")
 	}
-	m, err := packs.ImportPPackFile(fp)
-	if err != nil {
-		return "", err
-	}
-	name := m.DisplayName
-	if name == "" {
-		name = m.ID
-	}
-	gv := m.GameVersion
-	if gv == "" {
-		gv = "1.21.1"
-	}
-	loader := m.Loader
-	if loader == "" {
-		loader = "neoforge"
-	}
-	return profiles.Create(map[string]any{
-		"name":                       name,
-		"game_version":               gv,
-		"loader":                     loader,
-		"selected_pixelplay_pack_id": m.ID,
-	})
 }

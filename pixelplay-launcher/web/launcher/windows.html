@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pixel Play — Windows Setup (NSIS)</title>
+  <meta name="description" content="Descargá el instalador NSIS oficial de Pixel Play para Windows x64." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #070a12;
+      --ink: #e8eefc;
+      --muted: #8b97b3;
+      --line: rgba(255,255,255,.1);
+      --accent: #5eead4;
+      --accent-2: #38bdf8;
+      --panel: rgba(14,20,36,.82);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      min-height: 100vh;
+      font-family: "Space Grotesk", system-ui, sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(900px 500px at 15% -10%, rgba(56,189,248,.22), transparent 55%),
+        radial-gradient(700px 420px at 90% 10%, rgba(94,234,212,.16), transparent 50%),
+        linear-gradient(160deg, #05070d 0%, #0b1220 45%, #070a12 100%);
+    }
+    .grid {
+      position: fixed; inset: 0; pointer-events: none; opacity: .35;
+      background-image:
+        linear-gradient(rgba(255,255,255,.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.03) 1px, transparent 1px);
+      background-size: 48px 48px;
+    }
+    header {
+      max-width: 920px; margin: 0 auto; padding: 28px 24px 0;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .brand { color: var(--ink); text-decoration: none; font-weight: 700; letter-spacing: .04em; }
+    .brand span { color: var(--accent); }
+    nav a { color: var(--muted); text-decoration: none; margin-left: 18px; font-size: .92rem; }
+    nav a:hover { color: var(--ink); }
+    main { max-width: 920px; margin: 0 auto; padding: 64px 24px 80px; }
+    .pill {
+      display: inline-block; font-family: "IBM Plex Mono", monospace; font-size: .78rem;
+      letter-spacing: .08em; text-transform: uppercase; color: var(--accent);
+      border: 1px solid rgba(94,234,212,.35); padding: 6px 12px; border-radius: 999px;
+      background: rgba(94,234,212,.08); margin-bottom: 22px;
+    }
+    h1 {
+      font-size: clamp(2.4rem, 5vw, 3.6rem); line-height: 1.05; font-weight: 700;
+      max-width: 14ch; margin-bottom: 16px;
+    }
+    h1 em { font-style: normal; color: var(--accent-2); }
+    .lead { color: var(--muted); font-size: 1.1rem; max-width: 46ch; line-height: 1.55; margin-bottom: 36px; }
+    .panel {
+      border: 1px solid var(--line); background: var(--panel); backdrop-filter: blur(10px);
+      border-radius: 18px; padding: 28px; display: grid; gap: 18px;
+    }
+    .meta { font-family: "IBM Plex Mono", monospace; font-size: .8rem; color: var(--muted); letter-spacing: .06em; text-transform: uppercase; }
+    .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      padding: 14px 22px; border-radius: 12px; text-decoration: none; font-weight: 600;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #041018;
+    }
+    .btn.ghost {
+      background: transparent; color: var(--ink); border: 1px solid var(--line);
+    }
+    .btn:hover { filter: brightness(1.08); }
+    ul { list-style: none; display: grid; gap: 10px; color: var(--muted); }
+    ul li::before { content: "→ "; color: var(--accent); }
+    footer { max-width: 920px; margin: 0 auto; padding: 0 24px 40px; color: var(--muted); font-size: .9rem; }
+    footer a { color: var(--accent-2); }
+    @media (max-width: 640px) {
+      h1 { max-width: none; }
+      .panel { padding: 22px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="grid"></div>
+  <header>
+    <a class="brand" href="/">PIXEL <span>PLAY</span></a>
+    <nav>
+      <a href="/">inicio</a>
+      <a href="/linux.html">linux</a>
+      <a href="https://www.pixelplay.gg/windows">web</a>
+    </nav>
+  </header>
+  <main>
+    <div class="pill">Windows · NSIS · v6.0.1</div>
+    <h1>Instalador <em>Windows</em> oficial</h1>
+    <p class="lead">
+      PixelPlaySetup.exe — instalador NSIS x64. Un clic, escritorio + menú inicio,
+      y actualizaciones automáticas del launcher.
+    </p>
+    <div class="panel">
+      <div class="meta">pixelplaysetup.exe · windows x64 · nsis</div>
+      <div class="row">
+        <a class="btn" href="/dl/PixelPlaySetup.exe">Descargar PixelPlaySetup.exe</a>
+        <a class="btn ghost" href="https://panel.pixelplay.gg/dl/pixelplay/releases-v2/windows-x86_64/6.0.1/pixelplay-launcher-amd64-installer.exe">Mirror panel</a>
+      </div>
+      <ul>
+        <li>Requisito: Windows 10/11 x64</li>
+        <li>Instalá, abrí Pixel Play y conectá Microsoft</li>
+        <li>Si Windows SmartScreen avisa: Más info → Ejecutar de todas formas</li>
+      </ul>
+    </div>
+  </main>
+  <footer>
+    Pixel Play 6.0.1 —
+    <a href="https://www.pixelplay.gg">pixelplay.gg</a> ·
+    <a href="https://www.pixelplay.gg/windows">página web Windows</a>
+  </footer>
+</body>
+</html>

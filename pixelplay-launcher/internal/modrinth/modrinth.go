@@ -199,8 +199,12 @@ func VersionsByHashes(hashes []string) (json.RawMessage, error) {
 	if len(hashes) == 0 {
 		return json.RawMessage("{}"), nil
 	}
+	payload := map[string]any{
+		"hashes":    hashes,
+		"algorithm": "sha1",
+	}
 	var raw json.RawMessage
-	err := postJSON("/version_files", hashes, &raw)
+	err := postJSON("/version_files", payload, &raw)
 	return raw, err
 }
 
@@ -243,4 +247,157 @@ func GameVersions() (json.RawMessage, error) {
 	var raw json.RawMessage
 	err := getJSON("/tag/game_version", nil, &raw)
 	return raw, err
+}
+
+// Version is a subset of Modrinth's version object used for modpack installs.
+type Version struct {
+	ID            string   `json:"id"`
+	ProjectID     string   `json:"project_id"`
+	Name          string   `json:"name"`
+	VersionNumber string   `json:"version_number"`
+	GameVersions  []string `json:"game_versions"`
+	Loaders       []string `json:"loaders"`
+	Files         []File   `json:"files"`
+}
+
+type File struct {
+	Hashes   map[string]string `json:"hashes"`
+	URL      string            `json:"url"`
+	Filename string            `json:"filename"`
+	Primary  bool              `json:"primary"`
+	Size     int64             `json:"size"`
+}
+
+// MrpackCandidate is the downloadable .mrpack resolved for a game/loader combo.
+type MrpackCandidate struct {
+	ProjectSlug   string `json:"project_slug"`
+	ProjectID     string `json:"project_id"`
+	VersionID     string `json:"version_id"`
+	VersionNumber string `json:"version_number"`
+	VersionName   string `json:"version_name"`
+	DownloadURL   string `json:"download_url"`
+	FileName      string `json:"file_name"`
+	FileSize      int64  `json:"file_size"`
+}
+
+// ListVersions returns typed project versions filtered by optional loaders/game versions.
+func ListVersions(idOrSlug string, loaders, gameVersions []string) ([]Version, error) {
+	raw, err := ProjectVersions(idOrSlug, loaders, gameVersions)
+	if err != nil {
+		return nil, err
+	}
+	var versions []Version
+	if err := json.Unmarshal(raw, &versions); err != nil {
+		return nil, fmt.Errorf("parse versions: %w", err)
+	}
+	return versions, nil
+}
+
+func containsFold(list []string, want string) bool {
+	want = strings.ToLower(strings.TrimSpace(want))
+	for _, v := range list {
+		if strings.ToLower(strings.TrimSpace(v)) == want {
+			return true
+		}
+	}
+	return false
+}
+
+func primaryMrpack(files []File) (File, bool) {
+	var fallback File
+	found := false
+	for _, f := range files {
+		name := strings.ToLower(f.Filename)
+		if !strings.HasSuffix(name, ".mrpack") {
+			continue
+		}
+		if f.Primary {
+			return f, true
+		}
+		if !found {
+			fallback = f
+			found = true
+		}
+	}
+	return fallback, found
+}
+
+// FindMrpack resolves the newest version of a Modrinth modpack for gameVersion+loader
+// and returns its primary .mrpack download URL.
+func FindMrpack(projectSlug, gameVersion, loader string) (*MrpackCandidate, error) {
+	projectSlug = strings.TrimSpace(projectSlug)
+	gameVersion = strings.TrimSpace(gameVersion)
+	loader = strings.TrimSpace(loader)
+	if projectSlug == "" {
+		return nil, fmt.Errorf("falta project slug")
+	}
+	if gameVersion == "" {
+		return nil, fmt.Errorf("falta game version")
+	}
+	if loader == "" {
+		loader = "fabric"
+	}
+
+	versions, err := ListVersions(projectSlug, []string{loader}, []string{gameVersion})
+	if err != nil {
+		return nil, err
+	}
+	// Defensive client-side filter (API already filters, but keep exact match).
+	filtered := make([]Version, 0, len(versions))
+	for _, v := range versions {
+		if !containsFold(v.GameVersions, gameVersion) {
+			continue
+		}
+		if !containsFold(v.Loaders, loader) {
+			continue
+		}
+		filtered = append(filtered, v)
+	}
+	if len(filtered) == 0 {
+		return nil, fmt.Errorf("no hay versión de %s para %s/%s", projectSlug, gameVersion, loader)
+	}
+
+	// Modrinth returns newest first; take the first with a .mrpack file.
+	for _, v := range filtered {
+		file, ok := primaryMrpack(v.Files)
+		if !ok || strings.TrimSpace(file.URL) == "" {
+			continue
+		}
+		return &MrpackCandidate{
+			ProjectSlug:   projectSlug,
+			ProjectID:     v.ProjectID,
+			VersionID:     v.ID,
+			VersionNumber: v.VersionNumber,
+			VersionName:   v.Name,
+			DownloadURL:   file.URL,
+			FileName:      file.Filename,
+			FileSize:      file.Size,
+		}, nil
+	}
+	return nil, fmt.Errorf("ninguna versión de %s trae .mrpack para %s/%s", projectSlug, gameVersion, loader)
+}
+
+// DefaultOptimizedPackSlugs: Fabulously Optimized first; Simply Optimized slug is gone
+// on Modrinth, so "sop-continued" (Simply Optimized Continued) is the practical fallback.
+var DefaultOptimizedPackSlugs = []string{
+	"fabulously-optimized",
+	"sop-continued",
+	"simply-optimized",
+}
+
+// FindOptimizedClientMrpack tries preferred slugs until one resolves for gameVersion/loader.
+func FindOptimizedClientMrpack(gameVersion, loader string, preferredSlugs ...string) (*MrpackCandidate, error) {
+	slugs := preferredSlugs
+	if len(slugs) == 0 {
+		slugs = append([]string{}, DefaultOptimizedPackSlugs...)
+	}
+	var errs []string
+	for _, slug := range slugs {
+		cand, err := FindMrpack(slug, gameVersion, loader)
+		if err == nil {
+			return cand, nil
+		}
+		errs = append(errs, slug+": "+err.Error())
+	}
+	return nil, fmt.Errorf("no se encontró modpack de optimización (%s)", strings.Join(errs, "; "))
 }

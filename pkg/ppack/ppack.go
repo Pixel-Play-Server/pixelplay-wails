@@ -22,15 +22,38 @@ const (
 	DefaultUpdaterTemplate = "https://panel.pixelplay.gg/dl/pixelplay/modpacks/{id}/version.json"
 )
 
+// zipEntryBase returns the file basename of a zip entry, normalizing Windows '\' paths.
+// On Linux filepath.ToSlash / filepath.Base do NOT treat '\' as a separator, so packs
+// zipped on Windows (or some GUI tools) would fail to find manifest.json otherwise.
+func zipEntryBase(name string) string {
+	n := strings.ReplaceAll(name, "\\", "/")
+	n = strings.TrimSuffix(n, "/")
+	if i := strings.LastIndex(n, "/"); i >= 0 {
+		n = n[i+1:]
+	}
+	return n
+}
+
+func isManifestFileName(base string) bool {
+	switch strings.ToLower(strings.TrimSpace(base)) {
+	case ManifestName, "manifesto.json": // alias tipográfico / docs viejos
+		return true
+	default:
+		return false
+	}
+}
+
 // Policy controls how the launcher treats an installed pack.
 type Policy struct {
-	IsProtectedByAuthor   bool     `json:"is_protected_by_author"`
-	AllowModAutoUpdates   bool     `json:"allow_mod_auto_updates"`
-	BlockPackModUpdates   bool     `json:"block_pack_mod_updates"`
-	AllowOpenFolder       bool     `json:"allow_open_folder"`
-	DefaultResourcePacks  []string `json:"default_resource_packs"`
-	DefaultShaderPacks    []string `json:"default_shader_packs"`
-	HideModsUI            bool     `json:"hide_mods_ui"`
+	IsProtectedByAuthor  bool     `json:"is_protected_by_author"`
+	AllowModAutoUpdates  bool     `json:"allow_mod_auto_updates"`
+	BlockPackModUpdates  bool     `json:"block_pack_mod_updates"`
+	AllowOpenFolder      bool     `json:"allow_open_folder"`
+	DefaultResourcePacks []string `json:"default_resource_packs"`
+	DefaultShaderPacks   []string `json:"default_shader_packs"`
+	HideModsUI           bool     `json:"hide_mods_ui"`
+	// AutoJoinServer, if set, is passed as --quickPlayMultiplayer on launch (and Test).
+	AutoJoinServer string `json:"autojoin_server,omitempty"`
 }
 
 // Updater points at a remote version.json for the pack (like launcher updates).
@@ -62,6 +85,8 @@ type Manifest struct {
 	InheritsFrom  []string        `json:"inherits_from,omitempty"`
 	ExcludeMods   []string        `json:"exclude_mods,omitempty"`
 	Notes         string          `json:"notes,omitempty"`
+	// ConfigSource is the last folder imported into overrides/ (Studio metadata only).
+	ConfigSource string `json:"config_source,omitempty"`
 }
 
 // VersionManifest is published next to .ppack artifacts on panel.pixelplay.gg.
@@ -115,34 +140,120 @@ func NewManifest(id, name string) Manifest {
 
 // ReadManifestFromZip reads manifest.json from a .ppack (or .zip) file.
 func ReadManifestFromZip(path string) (*Manifest, error) {
+	path = strings.TrimSpace(path)
+	if strings.HasPrefix(strings.ToLower(path), "file://") {
+		path = strings.TrimPrefix(path, "file://")
+		path = strings.TrimPrefix(path, "file:")
+		if u, err := decodeFileURI(path); err == nil {
+			path = u
+		}
+	}
 	zr, err := zip.OpenReader(path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("abrir %s: %w", path, err)
 	}
 	defer zr.Close()
 	for _, f := range zr.File {
-		name := filepath.ToSlash(f.Name)
-		if name == ManifestName || strings.HasSuffix(name, "/"+ManifestName) {
-			rc, err := f.Open()
-			if err != nil {
-				return nil, err
-			}
-			defer rc.Close()
-			data, err := io.ReadAll(rc)
-			if err != nil {
-				return nil, err
-			}
-			var m Manifest
-			if err := json.Unmarshal(data, &m); err != nil {
-				return nil, err
-			}
-			if m.Format == "" {
-				m.Format = FormatName
-			}
-			return &m, nil
+		if f.FileInfo().IsDir() {
+			continue
 		}
+		if !isManifestFileName(zipEntryBase(f.Name)) {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return nil, err
+		}
+		data, err := io.ReadAll(rc)
+		rc.Close()
+		if err != nil {
+			return nil, err
+		}
+		var m Manifest
+		if err := json.Unmarshal(data, &m); err != nil {
+			return nil, fmt.Errorf("parse %s: %w", f.Name, err)
+		}
+		if m.Format == "" {
+			m.Format = FormatName
+		}
+		return &m, nil
 	}
 	return nil, fmt.Errorf("manifest.json no encontrado en %s", path)
+}
+
+func decodeFileURI(p string) (string, error) {
+	// path may already be decoded; best-effort unescape (%20 etc.)
+	var b strings.Builder
+	for i := 0; i < len(p); i++ {
+		if p[i] == '%' && i+2 < len(p) {
+			var v byte
+			ok := true
+			for _, c := range []byte{p[i+1], p[i+2]} {
+				v <<= 4
+				switch {
+				case c >= '0' && c <= '9':
+					v |= c - '0'
+				case c >= 'a' && c <= 'f':
+					v |= c - 'a' + 10
+				case c >= 'A' && c <= 'F':
+					v |= c - 'A' + 10
+				default:
+					ok = false
+				}
+			}
+			if ok {
+				b.WriteByte(v)
+				i += 2
+				continue
+			}
+		}
+		b.WriteByte(p[i])
+	}
+	out := b.String()
+	if out == "" {
+		return p, fmt.Errorf("empty")
+	}
+	return out, nil
+}
+
+// ReadManifestFromDir reads manifest.json from an extracted project folder.
+func ReadManifestFromDir(dir string) (*Manifest, error) {
+	candidates := []string{
+		filepath.Join(dir, ManifestName),
+		filepath.Join(dir, "manifesto.json"),
+	}
+	// case-insensitive scan of top-level (Linux / Mint)
+	if entries, err := os.ReadDir(dir); err == nil {
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			if isManifestFileName(e.Name()) {
+				candidates = append([]string{filepath.Join(dir, e.Name())}, candidates...)
+				break
+			}
+		}
+	}
+	var lastErr error
+	for _, mp := range candidates {
+		data, err := os.ReadFile(mp)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		var m Manifest
+		if err := json.Unmarshal(data, &m); err != nil {
+			return nil, err
+		}
+		if m.Format == "" {
+			m.Format = FormatName
+		}
+		return &m, nil
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, fmt.Errorf("manifest.json no encontrado en %s", dir)
 }
 
 // WriteZip builds a .ppack from a working directory that contains manifest.json (+ optional files).
@@ -173,6 +284,8 @@ func WriteZip(srcDir, destPath string) error {
 	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
 		return err
 	}
+	destAbs, _ := filepath.Abs(destPath)
+	srcAbs, _ := filepath.Abs(srcDir)
 	out, err := os.Create(destPath)
 	if err != nil {
 		return err
@@ -181,18 +294,38 @@ func WriteZip(srcDir, destPath string) error {
 	zw := zip.NewWriter(out)
 	defer zw.Close()
 
-	err = filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
+	added := 0
+	skipped := 0
+	err = filepath.Walk(srcAbs, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "ppack walk err %s: %v\n", path, err)
 			return err
 		}
 		if info.IsDir() {
+			base := filepath.Base(path)
+			if path != srcAbs && (base == "exports" || base == ".git") {
+				fmt.Fprintf(os.Stderr, "ppack skip dir %s\n", path)
+				return filepath.SkipDir
+			}
 			return nil
 		}
-		rel, err := filepath.Rel(srcDir, path)
+		if !info.Mode().IsRegular() {
+			skipped++
+			return nil
+		}
+		if destAbs != "" && filepath.Clean(path) == destAbs {
+			skipped++
+			return nil
+		}
+		rel, err := filepath.Rel(srcAbs, path)
 		if err != nil {
 			return err
 		}
 		rel = filepath.ToSlash(rel)
+		if strings.HasPrefix(rel, "exports/") {
+			skipped++
+			return nil
+		}
 		w, err := zw.Create(rel)
 		if err != nil {
 			return err
@@ -202,10 +335,20 @@ func WriteZip(srcDir, destPath string) error {
 			return err
 		}
 		defer f.Close()
-		_, err = io.Copy(w, f)
-		return err
+		n, err := io.Copy(w, f)
+		if err != nil {
+			return err
+		}
+		added++
+		fmt.Fprintf(os.Stderr, "ppack + %s (%d bytes)\n", rel, n)
+		return nil
 	})
-	return err
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ppack WriteZip FAIL dest=%s: %v\n", destPath, err)
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "ppack WriteZip OK dest=%s files=%d skipped=%d\n", destPath, added, skipped)
+	return nil
 }
 
 // ImportLegacyJSON converts a pixelplay pack definition JSON object into a Manifest.
@@ -364,13 +507,53 @@ func EnsureWorkDir(dir string, id, name string) (*Manifest, error) {
 		if err := json.Unmarshal(data, &m); err != nil {
 			return nil, err
 		}
+		_ = SeedDefaultFolders(dir)
 		return &m, nil
 	}
 	m := NewManifest(id, name)
 	if err := SaveManifest(mp, &m); err != nil {
 		return nil, err
 	}
+	_ = SeedDefaultFolders(dir)
 	return &m, nil
+}
+
+// DefaultProjectFolders is the skeleton every Pixel Studio pack gets.
+var DefaultProjectFolders = []string{
+	"overrides/config",
+	"overrides/kubejs",
+	"overrides/defaultconfigs",
+	"resourcepacks",
+	"shaderpacks",
+}
+
+// SeedDefaultFolders creates the default pack layout (config/kubejs/packs).
+func SeedDefaultFolders(dir string) error {
+	if dir == "" {
+		return fmt.Errorf("dir vacío")
+	}
+	for _, rel := range DefaultProjectFolders {
+		p := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			return err
+		}
+		keep := filepath.Join(p, ".keep")
+		if _, err := os.Stat(keep); err == nil {
+			continue
+		}
+		entries, err := os.ReadDir(p)
+		if err != nil {
+			return err
+		}
+		if len(entries) == 0 {
+			_ = os.WriteFile(keep, []byte{}, 0o644)
+		}
+	}
+	readme := filepath.Join(dir, "overrides", "README.txt")
+	if _, err := os.Stat(readme); err != nil {
+		_ = os.WriteFile(readme, []byte("Carpeta default del pack.\n\nconfig/  kubejs/  defaultconfigs/  (se copian al cliente)\nEn la raíz del proyecto: resourcepacks/ y shaderpacks/\n"), 0o644)
+	}
+	return nil
 }
 
 // BytesManifest helper for tests.
@@ -386,7 +569,7 @@ func ZipContainsManifest(r io.ReaderAt, size int64) bool {
 		return false
 	}
 	for _, f := range zr.File {
-		if filepath.Base(f.Name) == ManifestName {
+		if !f.FileInfo().IsDir() && isManifestFileName(zipEntryBase(f.Name)) {
 			return true
 		}
 	}

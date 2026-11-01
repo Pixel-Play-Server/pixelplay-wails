@@ -30,6 +30,37 @@ func IsDisconnect(line string) bool {
 	return reDisconnect.MatchString(line)
 }
 
+type Session struct {
+	Host    string
+	Seconds int64
+}
+
+func ExtractSessions(logText string) []Session {
+	reVoice := "voice chat"
+	var out []Session
+	var cur string
+	for _, line := range strings.Split(logText, "\n") {
+		if strings.Contains(strings.ToLower(line), reVoice) {
+			continue
+		}
+		if host, ok := ParseConnecting(line); ok {
+			if cur != "" {
+				out = append(out, Session{Host: cur})
+			}
+			cur = host
+			continue
+		}
+		if cur != "" && IsDisconnect(line) {
+			out = append(out, Session{Host: cur})
+			cur = ""
+		}
+	}
+	if cur != "" {
+		out = append(out, Session{Host: cur})
+	}
+	return out
+}
+
 func looksLikeServer(host string) bool {
 	h := strings.ToLower(strings.Trim(host, "[]"))
 	if h == "" || h == "server" || h == "the" {

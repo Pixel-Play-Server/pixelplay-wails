@@ -7,6 +7,15 @@ import (
 	"testing"
 )
 
+func TestSkipUserData(t *testing.T) {
+	if !skipUserData("options.txt") || !skipUserData("saves/world/level.dat") {
+		t.Fatal("should skip player data")
+	}
+	if skipUserData("config/create-common.toml") {
+		t.Fatal("pack config should apply")
+	}
+}
+
 func TestSodiumUses08(t *testing.T) {
 	mods := []modEntry{{
 		ID:            "sodium",
@@ -49,4 +58,17 @@ func TestList(t *testing.T) {
 		t.Fatal("expected packs")
 	}
 	t.Logf("packs=%d first=%s mods=%d", len(list), list[0].DisplayName, list[0].ModCount)
+}
+
+func TestUpdaterTargetsPack(t *testing.T) {
+	official := "https://panel.pixelplay.gg/dl/pixelplay/modpacks/pixelplay-survival-1211/version.json"
+	if !updaterTargetsPack("pixelplay-survival-1211", official) {
+		t.Fatal("official pack should own its updater")
+	}
+	if updaterTargetsPack("studio-test-pixelplay-survival-1211", official) {
+		t.Fatal("studio copy must not inherit the official updater")
+	}
+	if !updaterTargetsPack("custom-pack", "https://example.com/custom/version.json") {
+		t.Fatal("custom URL without /modpacks/ should still work")
+	}
 }

@@ -23,6 +23,7 @@ Portado en Go ahora:
 - Frameless (sin chrome GNOME) + drag en header Pixel Play
 - .ppack: import (zip + extract), policy, updater, mods al Play, resource/shader packs default
 - App hermana: pixelmodpack (editor .ppack)
+- Shell Windows: pixelplay-launcher-windows (replace → host + mismo frontend)
 
 Pendiente (no bloquea Play):
 1) OAuth MSA en ventana embebida (hoy device code)

@@ -121,7 +121,23 @@ func UpdaterFor(packID string) (*ppack.Updater, string, error) {
 	if !ok {
 		return nil, "", fmt.Errorf("pack sin metadata .ppack")
 	}
+	if !updaterTargetsPack(packID, meta.Updater.URL) {
+		return &ppack.Updater{}, meta.PackVersion, nil
+	}
 	return &meta.Updater, meta.PackVersion, nil
+}
+
+// updaterTargetsPack rejects copies/tests that inherited another pack's updater URL.
+func updaterTargetsPack(packID, rawURL string) bool {
+	packID = strings.TrimSpace(packID)
+	rawURL = strings.TrimSpace(rawURL)
+	if packID == "" || rawURL == "" {
+		return false
+	}
+	if !strings.Contains(rawURL, "/modpacks/") {
+		return true
+	}
+	return strings.Contains(rawURL, "/modpacks/"+packID+"/")
 }
 
 func parsePPack(raw json.RawMessage) (*ppack.Manifest, bool) {
@@ -149,8 +165,35 @@ func parsePPack(raw json.RawMessage) (*ppack.Manifest, bool) {
 	return &m, true
 }
 
+// Upsert writes a pack definition into pixelplay_modpacks.json without touching other packs.
+func Upsert(id string, m *ppack.Manifest) error {
+	if id == "" {
+		return fmt.Errorf("id vacío")
+	}
+	cfg, err := loadFile()
+	if err != nil {
+		cfg = &fileShape{Packs: map[string]packDef{}, Repositories: json.RawMessage("{}")}
+	}
+	shape := m.ToLauncherPackShape()
+	b, err := json.Marshal(shape)
+	if err != nil {
+		return err
+	}
+	var def packDef
+	if err := json.Unmarshal(b, &def); err != nil {
+		return err
+	}
+	cfg.Packs[id] = def
+	return saveFile(cfg)
+}
+
 // ImportPPackFile merges a .ppack into local packs config.
 func ImportPPackFile(path string) (*ppack.Manifest, error) {
+	path = strings.TrimSpace(path)
+	if strings.HasPrefix(strings.ToLower(path), "file://") {
+		path = strings.TrimPrefix(path, "file://")
+		path = strings.TrimPrefix(path, "FILE://")
+	}
 	m, err := ppack.ReadManifestFromZip(path)
 	if err != nil {
 		return nil, err
@@ -175,7 +218,32 @@ func ImportPPackFile(path string) (*ppack.Manifest, error) {
 	if err := saveFile(cfg); err != nil {
 		return nil, err
 	}
+	migrateProfilesToPack(m)
 	return m, nil
+}
+
+// migrateProfilesToPack moves linked profiles to the pack's game version/loader
+// (e.g. NeoForge 1.21.1 -> Fabric 1.21.11), otherwise pack mods never match.
+func migrateProfilesToPack(m *ppack.Manifest) {
+	gv := strings.TrimSpace(m.GameVersion)
+	ld := strings.ToLower(strings.TrimSpace(m.Loader))
+	if m.ID == "" || gv == "" || ld == "" {
+		return
+	}
+	list, err := profiles.List()
+	if err != nil {
+		return
+	}
+	for _, p := range list {
+		if p.SelectedPixelplayPackID == nil || *p.SelectedPixelplayPackID != m.ID {
+			continue
+		}
+		if p.GameVersion == gv && strings.EqualFold(p.Loader, ld) {
+			continue
+		}
+		_ = profiles.Update(p.ID, map[string]any{"game_version": gv, "loader": ld})
+		_ = profiles.ClearLoaderVersion(p.ID)
+	}
 }
 
 // List reads local pixelplay_modpacks.json (written by pixel-sync / pixelmodpack).
