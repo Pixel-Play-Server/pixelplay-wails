@@ -4,7 +4,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SSH_HOST="${PIXEL_SSH_HOST:-pixel}"
-VER="${1:-6.0.4}"
+VER="${1:-6.0.5}"
 NOTES="${2:-Pixel Play update}"
 PUB_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 REMOTE_ROOT="/srv/dl/pixelplay/releases-v2"
