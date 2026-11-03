@@ -30,6 +30,13 @@ if [[ ! -f "$WIN_SETUP" ]]; then
   exit 1
 fi
 
+# Execute the exact artifact: compilation alone cannot catch a corrupt runtime table.
+ACTUAL_VERSION="$("$LINUX_BIN" --version)"
+if [[ "$ACTUAL_VERSION" != "$VER" ]]; then
+  echo "Linux startup/version check failed: expected $VER, got $ACTUAL_VERSION" >&2
+  exit 1
+fi
+
 write_manifest() {
   local target="$1" artifact="$2" out="$3"
   cat >"$out" <<EOF

@@ -48,6 +48,9 @@ jobs:
           cp -R _ui/public pixelplay-launcher/frontend/public
           npm ci --prefix pixelplay-launcher/frontend
           npm run build --prefix pixelplay-launcher/frontend
+      - name: Backend regression tests
+        working-directory: pixelplay-launcher
+        run: go test ./internal/updater ./internal/horizon ./internal/unified
       - name: Install Wails
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.15.0
       - name: Build and smoke test macOS

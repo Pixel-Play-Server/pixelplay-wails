@@ -1,4 +1,4 @@
-# Pixel Play 7.0
+# Pixel Play 7.0.1
 
 Un launcher para tener tus perfiles, mods y amigos en un mismo lugar, con una interfaz de estilo Minecraft.
 
@@ -8,7 +8,7 @@ Un launcher para tener tus perfiles, mods y amigos en un mismo lugar, con una in
 
 - Navegación con secciones visibles, controles de cuenta compactos y la misma estética pixelada en todo el launcher.
 - Perfiles y gestión de contenido desde Modrinth y CurseForge.
-- Horizon 26.3 integrado en el flujo de perfiles de Pixel Play para Linux y Windows x86_64.
+- Horizon 26.3 integrado en el flujo de perfiles de Pixel Play para Linux y Windows x86_64 y macOS Apple Silicon.
 - Catálogo de [playhorizon.dev/mods](https://playhorizon.dev/mods): mods WebAssembly `.hmod`, consulta de proyectos nativos `.hnmod` y descarga verificada de resource packs.
 - Cuentas más ordenadas y correcciones en mensajes, confirmaciones de envío y notificaciones de amigos.
 - Capas oficiales de Minecraft de tu cuenta Microsoft; sin catálogo de capas personalizadas.
@@ -26,7 +26,9 @@ Horizon y Minecraft requieren sus propios recursos y condiciones de uso. Pixel P
 
 La versión de escritorio 7.0 utiliza **Go + Wails + React/TypeScript**. El árbol `src-tauri` del repositorio frontend conserva la implementación anterior; no es el proceso de compilación de esta versión.
 
-Consulta las instrucciones del [backend](https://github.com/Pixel-Play-Server/pixelplay-wails/tree/main/pixelplay-launcher). Las distribuciones de esta versión son Linux y Windows x86_64; no se anuncia un nuevo binario macOS sin una compilación verificada.
+Consulta las instrucciones del [backend](https://github.com/Pixel-Play-Server/pixelplay-wails/tree/main/pixelplay-launcher). Las distribuciones son Linux x86_64, Windows x86_64, macOS Apple Silicon e Intel. El runtime Horizon integrado admite Linux/Windows x86_64 y macOS ARM; el launcher en macOS Intel utiliza Minecraft Java.
+
+Los paquetes macOS tienen firma ad hoc, sin notarización de Apple. Se distribuyen como `.app` dentro de un ZIP. El actualizador reemplaza el bundle completo y conserva la copia anterior.
 
 ## Créditos y licencia
 

@@ -72,8 +72,9 @@ func Find(gameDir string) (Runtime, bool) {
 }
 
 func Ensure(ctx context.Context, gameDir string, emit func(string)) (Runtime, error) {
-	if runtime.GOARCH != "amd64" || (runtime.GOOS != "linux" && runtime.GOOS != "windows") {
-		return Runtime{}, fmt.Errorf("Horizon requiere Linux o Windows x86_64")
+	asset, digest, err := releaseAsset(runtime.GOOS, runtime.GOARCH)
+	if err != nil {
+		return Runtime{}, err
 	}
 	if r, ok := Find(gameDir); ok {
 		return r, nil
@@ -81,10 +82,6 @@ func Ensure(ctx context.Context, gameDir string, emit func(string)) (Runtime, er
 	r := at(filepath.Join(gameDir, ".horizon-native", Version))
 	if !file(r.Binary) {
 		emit("Descargando motor Horizon " + Version + "…")
-		asset, digest := "horizon-linux-x86_64.tar.gz", "16e62f7a9ac95d6be788e92cd5fb50a569926d2378531a4e0ea3a07337b79c11"
-		if runtime.GOOS == "windows" {
-			asset, digest = "horizon-windows-x64.zip", "29d3cef224aecdafea314cf6a3acb5caf8228edef9a3c5d73a0b4fe3b2696fca"
-		}
 		parent := filepath.Dir(r.Root)
 		if err := os.MkdirAll(parent, 0700); err != nil {
 			return r, err
@@ -103,10 +100,7 @@ func Ensure(ctx context.Context, gameDir string, emit func(string)) (Runtime, er
 		}
 		payload := stage
 		if !file(filepath.Join(payload, exe("horizon-client"))) {
-			folder := "horizon-linux-x86_64"
-			if runtime.GOOS == "windows" {
-				folder = "horizon-windows-x64"
-			}
+			folder := strings.TrimSuffix(strings.TrimSuffix(asset, ".tar.gz"), ".zip")
 			payload = filepath.Join(stage, folder)
 		}
 		if !file(filepath.Join(payload, exe("horizon-client"))) {
@@ -342,4 +336,20 @@ func extract(archive, root string) error {
 			return err
 		}
 	}
+}
+
+func SupportedPlatform() bool {
+	_, _, err := releaseAsset(runtime.GOOS, runtime.GOARCH)
+	return err == nil
+}
+func releaseAsset(osName, arch string) (string, string, error) {
+	switch osName + "/" + arch {
+	case "linux/amd64":
+		return "horizon-linux-x86_64.tar.gz", "16e62f7a9ac95d6be788e92cd5fb50a569926d2378531a4e0ea3a07337b79c11", nil
+	case "windows/amd64":
+		return "horizon-windows-x64.zip", "29d3cef224aecdafea314cf6a3acb5caf8228edef9a3c5d73a0b4fe3b2696fca", nil
+	case "darwin/arm64":
+		return "horizon-macos-arm64.zip", "587fb8a653324e6f1b3bf59f1f2227ad99201ccaaf3f31024db25ccd4f37c63e", nil
+	}
+	return "", "", fmt.Errorf("Horizon está disponible en Linux/Windows x86_64 y macOS Apple Silicon; no existe un runtime oficial para macOS Intel en esta versión")
 }

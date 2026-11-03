@@ -11,7 +11,7 @@ import (
 	"pixelplay-launcher/internal/auth"
 	"pixelplay-launcher/internal/horizon"
 	"regexp"
-	"runtime"
+
 	"strings"
 
 	"pixelplay-launcher/internal/paths"
@@ -21,8 +21,8 @@ import (
 
 // Horizon runs directly. PixelPlay owns preparation and the selected identity.
 func horizonCommand(ctx context.Context, p profileJSON, opt Options, native horizon.Runtime, acc *accounts.Credentials) (*exec.Cmd, error) {
-	if (runtime.GOOS != "linux" && runtime.GOOS != "windows") || runtime.GOARCH != "amd64" {
-		return nil, fmt.Errorf("este perfil Horizon requiere Linux o Windows x86_64")
+	if !horizon.SupportedPlatform() {
+		return nil, fmt.Errorf("este perfil Horizon requiere Linux/Windows x86_64 o macOS Apple Silicon")
 	}
 	if p.LunarRuntime || p.SelectedPixelplayPackID != nil && *p.SelectedPixelplayPackID != "" {
 		return nil, fmt.Errorf("Horizon requiere un perfil independiente de Lunar y de packs Java")

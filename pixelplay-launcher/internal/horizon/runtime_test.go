@@ -71,3 +71,19 @@ func TestDownloadVerifiesBeforeInstall(t *testing.T) {
 		t.Fatal("verified cache should work offline", err)
 	}
 }
+
+func TestRuntimePlatforms(t *testing.T) {
+	for _, platform := range []struct{ os, arch, asset string }{
+		{"linux", "amd64", "horizon-linux-x86_64.tar.gz"},
+		{"windows", "amd64", "horizon-windows-x64.zip"},
+		{"darwin", "arm64", "horizon-macos-arm64.zip"},
+	} {
+		name, hash, err := releaseAsset(platform.os, platform.arch)
+		if err != nil || name != platform.asset || len(hash) != 64 {
+			t.Fatalf("bad platform: %+v %s %s %v", platform, name, hash, err)
+		}
+	}
+	if _, _, err := releaseAsset("darwin", "amd64"); err == nil {
+		t.Fatal("advertised nonexistent Intel runtime")
+	}
+}
