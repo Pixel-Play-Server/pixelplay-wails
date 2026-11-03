@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"pixelplay-launcher/internal/studiotest"
+	"pixelplay-launcher/internal/version"
 	"pixelplay-launcher/internal/webkitperm"
 
 	"github.com/wailsapp/wails/v2"
@@ -24,6 +25,10 @@ var assets embed.FS
 var appIcon []byte
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--version" {
+		fmt.Println(version.App)
+		return
+	}
 	if len(os.Args) >= 2 && os.Args[1] == "--studio-test" {
 		dir := ""
 		if len(os.Args) >= 3 {
