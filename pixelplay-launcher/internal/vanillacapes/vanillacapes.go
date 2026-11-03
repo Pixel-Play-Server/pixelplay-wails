@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"pixelplay-launcher/internal/accounts"
+	"pixelplay-launcher/internal/auth"
 	"pixelplay-launcher/internal/httpx"
 )
 
@@ -38,10 +39,21 @@ func activeToken() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if acc == nil || strings.TrimSpace(acc.AccessToken) == "" {
+	if acc == nil || acc.Offline() || strings.TrimSpace(acc.AccessToken) == "" {
 		return "", fmt.Errorf("no hay cuenta de Minecraft activa")
 	}
-	return acc.AccessToken, nil
+	refreshed, err := auth.RefreshMinecraftIfNeeded(*acc)
+	if err != nil {
+		return "", err
+	}
+	current, err := accounts.Active()
+	if err != nil {
+		return "", err
+	}
+	if current == nil || current.ID != acc.ID {
+		return "", fmt.Errorf("la cuenta cambió; vuelve a intentarlo")
+	}
+	return refreshed.AccessToken, nil
 }
 
 func Owned() ([]Cape, error) {
@@ -136,10 +148,10 @@ func ownedWith(tok string) ([]Cape, error) {
 	}
 	var prof struct {
 		Capes []struct {
-			ID      string `json:"id"`
-			State   string `json:"state"`
-			URL     string `json:"url"`
-			Alias   string `json:"alias"`
+			ID    string `json:"id"`
+			State string `json:"state"`
+			URL   string `json:"url"`
+			Alias string `json:"alias"`
 		} `json:"capes"`
 	}
 	if err := json.Unmarshal(b, &prof); err != nil {

@@ -13,14 +13,11 @@ import (
 
 	"pixelplay-launcher/internal/accounts"
 	"pixelplay-launcher/internal/auth"
-	"pixelplay-launcher/internal/capes"
-	"pixelplay-launcher/internal/capetemplates"
 	"pixelplay-launcher/internal/config"
 	"pixelplay-launcher/internal/content"
 	"pixelplay-launcher/internal/curseforge"
 	"pixelplay-launcher/internal/discordrpc"
 	"pixelplay-launcher/internal/download"
-	"pixelplay-launcher/internal/featured"
 	"pixelplay-launcher/internal/horizon"
 	"pixelplay-launcher/internal/httpx"
 	"pixelplay-launcher/internal/java"
@@ -472,9 +469,6 @@ func Dispatch(rt *Runtime, cmd string, argsJSON string) (any, error) {
 		}, nil
 
 	case "get_all_profiles_and_last_played":
-		if list, err := profiles.List(); err == nil && len(list) == 0 {
-			_, _ = featured.EnsureDefaultProfile()
-		}
 		raw, err := profiles.RawList()
 		if err != nil {
 			return nil, err
@@ -913,55 +907,8 @@ func Dispatch(rt *Runtime, cmd string, argsJSON string) (any, error) {
 		return map[string]any{"data": mods}, nil
 
 	// --- Capes ---
-	case "browse_capes":
-		payload := args
-		if raw, ok := args["payload"]; ok {
-			_ = json.Unmarshal(raw, &payload)
-		}
-		bp := capes.BrowseParams{}
-		if v := argIntPtr(payload, "page"); v != nil {
-			bp.Page = v
-		}
-		if v := argIntPtr(payload, "page_size", "pageSize"); v != nil {
-			bp.PageSize = v
-		}
-		bp.SortBy, _ = argString(payload, "sort_by", "sortBy")
-		bp.FilterCreator, _ = argString(payload, "filter_creator", "filterCreator")
-		bp.TimeFrame, _ = argString(payload, "time_frame", "timeFrame")
-		bp.PixelplayToken, _ = argString(payload, "pixelplay_token", "pixelplayToken")
-		bp.RequestUUID, _ = argString(payload, "request_uuid", "requestUuid")
-		if raw, ok := payload["filter_has_elytra"]; ok {
-			var b bool
-			if json.Unmarshal(raw, &b) == nil {
-				bp.FilterHasElytra = &b
-			}
-		} else if raw, ok := payload["filterHasElytra"]; ok {
-			var b bool
-			if json.Unmarshal(raw, &b) == nil {
-				bp.FilterHasElytra = &b
-			}
-		}
-		return capes.Browse(bp)
-	case "get_player_capes":
-		payload := args
-		if raw, ok := args["payload"]; ok {
-			_ = json.Unmarshal(raw, &payload)
-		}
-		pid, _ := argString(payload, "playerIdentifier", "player_identifier", "playerUuid", "player_uuid")
-		tok, _ := argString(payload, "pixelplayToken", "pixelplay_token")
-		return capes.PlayerCapes(pid, tok)
-	case "equip_cape":
-		hash, err := argString(args, "capeHash", "cape_hash")
-		if err != nil {
-			return nil, err
-		}
-		tok, _ := argString(args, "pixelplayToken", "pixelplay_token")
-		pu, _ := argString(args, "playerUuid", "player_uuid")
-		return nil, capes.Equip(hash, tok, pu)
-	case "unequip_cape":
-		tok, _ := argString(args, "pixelplayToken", "pixelplay_token")
-		pu, _ := argString(args, "playerUuid", "player_uuid")
-		return nil, capes.Unequip(tok, pu)
+	case "browse_capes", "get_player_capes", "equip_cape", "unequip_cape":
+		return nil, fmt.Errorf("las capas personalizadas ya no están disponibles; usa Capas vanilla")
 
 	case "get_standard_profiles":
 		return map[string]any{"profiles": []any{}}, nil
@@ -1084,7 +1031,7 @@ func Dispatch(rt *Runtime, cmd string, argsJSON string) (any, error) {
 		root := paths.ProfileDir(p.Path)
 		return dirNode(filepath.Base(root), root, 0), nil
 	case "is_content_installed", "batch_check_content_installed":
-		return map[string]any{"installed": false}, nil
+		return content.CheckInstalled(nestedRaw(args, argsJSON, "params"), cmd == "batch_check_content_installed")
 	case "set_file_enabled":
 		fp, err := argString(args, "filePath", "file_path")
 		if err != nil {
@@ -1162,6 +1109,31 @@ func Dispatch(rt *Runtime, cmd string, argsJSON string) (any, error) {
 		if err != nil {
 			return nil, err
 		}
+		source, _ := argString(payload, "source")
+		if source == "Horizon" {
+			dir, e := content.ProfileContentDir(pid, "Mod")
+			if e != nil {
+				return nil, e
+			}
+			if filepath.Base(dir) != "horizon-mods" {
+				return nil, fmt.Errorf("este mod requiere un perfil Horizon")
+			}
+			mid, e := argString(payload, "project_id")
+			if e != nil {
+				return nil, e
+			}
+			vid, _ := argString(payload, "version_id")
+			id, e := horizon.InstallRegistryContent(context.Background(), filepath.Dir(dir), mid, vid)
+			if e != nil {
+				return nil, e
+			}
+			ct, _ := argString(payload, "content_type", "contentType")
+			if strings.EqualFold(ct, "resourcepack") {
+				return nil, nil
+			}
+			return nil, horizon.SetModEnabled(filepath.Dir(dir), id, true)
+		}
+
 		ct, _ := argString(payload, "content_type", "contentType")
 		fname, _ := argString(payload, "file_name", "fileName")
 		dl, err := argString(payload, "download_url", "downloadUrl")
@@ -1492,61 +1464,13 @@ func Dispatch(rt *Runtime, cmd string, argsJSON string) (any, error) {
 		return nil, vanillacapes.Equip(id)
 	case "refresh_vanilla_cape_data":
 		return vanillacapes.Owned()
-	case "delete_cape":
-		hash, err := argString(args, "capeHash", "cape_hash")
-		if err != nil {
-			return nil, err
-		}
-		tok, _ := argString(args, "pixelplayToken", "pixelplay_token")
-		pu, _ := argString(args, "playerUuid", "player_uuid")
-		return nil, capes.DeleteCape(hash, tok, pu)
-	case "add_favorite_cape":
-		hash, err := argString(args, "capeHash", "cape_hash")
-		if err != nil {
-			return nil, err
-		}
-		tok, _ := argString(args, "pixelplayToken", "pixelplay_token")
-		return capes.Favorite(hash, tok, true)
-	case "remove_favorite_cape":
-		hash, err := argString(args, "capeHash", "cape_hash")
-		if err != nil {
-			return nil, err
-		}
-		tok, _ := argString(args, "pixelplayToken", "pixelplay_token")
-		return capes.Favorite(hash, tok, false)
-	case "get_capes_by_hashes":
-		var hashes []string
-		if raw, ok := args["hashes"]; ok {
-			_ = json.Unmarshal(raw, &hashes)
-		}
-		tok, _ := argString(args, "pixelplayToken", "pixelplay_token")
-		return capes.ByHashes(hashes, tok)
-	case "upload_cape":
-		tok, _ := argString(args, "pixelplayToken", "pixelplay_token")
-		pu, _ := argString(args, "playerUuid", "player_uuid")
-		fp, _ := argString(args, "imagePath", "image_path", "path")
-		if fp == "" && rt != nil && rt.PickFile != nil {
-			var err error
-			fp, err = rt.PickFile("Capa PNG", "*.png")
-			if err != nil || fp == "" {
-				return nil, err
-			}
-		}
-		b, err := os.ReadFile(fp)
-		if err != nil {
-			return nil, err
-		}
-		return capes.UploadPNG(b, tok, pu)
-	case "download_template_and_open_explorer":
-		dir := filepath.Join(paths.DataDir(), "cape-templates")
-		if err := capetemplates.WriteTo(dir); err != nil {
-			return nil, err
-		}
-		return dir, osopen.Path(dir)
+	case "delete_cape", "add_favorite_cape", "remove_favorite_cape", "get_capes_by_hashes", "upload_cape", "download_template_and_open_explorer":
+		return nil, fmt.Errorf("las capas personalizadas ya no están disponibles; usa Capas vanilla")
 	case "get_featured_server":
-		return featured.InfoDefaults(), nil
+		return nil, nil
 	case "ensure_featured_server_profile":
-		return featured.Ensure()
+		return nil, fmt.Errorf("los servidores patrocinados ya no están disponibles")
+
 	case "get_profile_by_name_or_uuid":
 		q, err := argString(args, "nameOrUuidQuery", "name_or_uuid_query", "query")
 		if err != nil {

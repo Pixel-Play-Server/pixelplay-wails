@@ -15,6 +15,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"pixelplay-launcher/internal/accounts"
 	"pixelplay-launcher/internal/auth"
 	"pixelplay-launcher/internal/httpx"
 	"pixelplay-launcher/internal/nativertc"
@@ -53,6 +54,7 @@ type Client struct {
 	conn      *websocket.Conn
 	user      string
 	connected bool
+	epoch     uint64
 	call      *CallState
 	wake      chan struct{}
 	engine    voice.Engine
@@ -85,7 +87,10 @@ func Default() *Client {
 func (c *Client) Reconnect() {
 	c.mu.Lock()
 	conn := c.conn
+	c.conn = nil
+	c.epoch++
 	c.mu.Unlock()
+	c.setConnected(false, "")
 	if conn != nil {
 		_ = conn.Close()
 	}
@@ -98,6 +103,9 @@ func (c *Client) Reconnect() {
 func (c *Client) loop(ctx context.Context) {
 	backoff := time.Second
 	for ctx.Err() == nil {
+		c.mu.Lock()
+		epoch := c.epoch
+		c.mu.Unlock()
 		token, user, err := auth.ActivePixelSession()
 		if err != nil {
 			c.setConnected(false, "")
@@ -117,12 +125,18 @@ func (c *Client) loop(ctx context.Context) {
 		}
 		backoff = time.Second
 		c.mu.Lock()
+		if epoch != c.epoch {
+			c.mu.Unlock()
+			_ = conn.Close()
+			continue
+		}
 		c.conn, c.user = conn, user
 		c.mu.Unlock()
 
 		done := make(chan struct{})
 		go c.watchAccount(ctx, conn, user, done)
 		c.read(conn)
+		_ = conn.Close()
 		close(done)
 
 		c.mu.Lock()
@@ -130,6 +144,8 @@ func (c *Client) loop(ctx context.Context) {
 		c.mu.Unlock()
 		c.endLocal("disconnected")
 		c.setConnected(false, "")
+		c.sleep(ctx, backoff)
+		backoff = min(backoff*2, 30*time.Second)
 	}
 }
 
@@ -165,8 +181,8 @@ func (c *Client) watchAccount(ctx context.Context, conn *websocket.Conn, user st
 
 func (c *Client) setConnected(v bool, user string) {
 	c.mu.Lock()
-	changed := c.connected != v
-	c.connected = v
+	changed := c.connected != v || c.user != user
+	c.connected, c.user = v, user
 	c.mu.Unlock()
 	if changed {
 		c.emit("social_event", map[string]any{"t": "status", "connected": v, "user": user})
@@ -188,6 +204,12 @@ func (c *Client) read(conn *websocket.Conn) {
 		if json.Unmarshal(data, &ev) != nil {
 			continue
 		}
+		c.mu.Lock()
+		active := c.conn == conn
+		c.mu.Unlock()
+		if !active {
+			return
+		}
 		c.handle(ev)
 	}
 }
@@ -208,7 +230,7 @@ func (c *Client) handle(ev map[string]any) {
 		// Calls removed from launcher — auto-decline inbound invites.
 		if action, _ := ev["action"].(string); action == "invite" {
 			_ = c.writeJSON(map[string]any{"t": "call", "action": "decline", "call": ev["call"]})
-			break
+			return
 		}
 		c.onCall(ev)
 	}
@@ -339,6 +361,23 @@ func (c *Client) Status() map[string]any {
 }
 
 func (c *Client) SendMessage(to, text, cid string) error {
+	to, text, cid = strings.TrimSpace(to), strings.TrimSpace(text), strings.TrimSpace(cid)
+	if to == "" || text == "" || cid == "" {
+		return fmt.Errorf("faltan destinatario, mensaje o identificador")
+	}
+	if len([]rune(text)) > 2000 || len(cid) > 128 {
+		return fmt.Errorf("mensaje demasiado largo")
+	}
+	acc, err := accounts.Active()
+	if err != nil {
+		return err
+	}
+	c.mu.Lock()
+	user, connected := c.user, c.connected
+	c.mu.Unlock()
+	if acc == nil || !acc.PixelAccount() || !connected || !strings.EqualFold(acc.Username, user) {
+		return fmt.Errorf("el chat está reconectando; vuelve a intentarlo")
+	}
 	return c.writeJSON(map[string]any{"t": "msg", "to": to, "text": text, "cid": cid})
 }
 

@@ -14,7 +14,7 @@
     !define INFO_PRODUCTNAME "Pixel Play Launcher"
 !endif
 !ifndef INFO_PRODUCTVERSION
-    !define INFO_PRODUCTVERSION "6.0.3"
+    !define INFO_PRODUCTVERSION "7.0.0"
 !endif
 !ifndef INFO_COPYRIGHT
     !define INFO_COPYRIGHT "Copyright © Pixel Play"

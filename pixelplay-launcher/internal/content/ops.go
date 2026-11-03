@@ -16,6 +16,9 @@ func Uninstall(profileID, filePath, sha1, contentType string) error {
 		return protect.ErrAuthorProtected
 	}
 	if filePath != "" {
+		if err := validateContentPath(profileID, contentTypeOrMod(contentType), filePath); err != nil {
+			return err
+		}
 		return Delete(filePath)
 	}
 	if sha1 == "" {
@@ -38,6 +41,9 @@ func Toggle(profileID, filePath, sha1, contentType string, enabled bool) error {
 		return protect.ErrAuthorProtected
 	}
 	if filePath != "" {
+		if err := validateContentPath(profileID, contentTypeOrMod(contentType), filePath); err != nil {
+			return err
+		}
 		return SetEnabled(filePath, enabled)
 	}
 	if sha1 == "" {
@@ -66,6 +72,10 @@ func InstallRemote(profileID, contentType, fileName, downloadURL string) error {
 	if err != nil {
 		return err
 	}
+	if filepath.Base(dir) == "horizon-mods" {
+		return fmt.Errorf("los mods Horizon deben instalarse desde su catálogo verificado o desde un archivo .hmod")
+	}
+
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
@@ -111,4 +121,24 @@ func PreviewImage(path string) (map[string]any, error) {
 		"preview_width":   w,
 		"preview_height":  h,
 	}, nil
+}
+
+func validateContentPath(profileID, ct, path string) error {
+	dir, err := ProfileContentDir(profileID, ct)
+	if err != nil {
+		return err
+	}
+	root, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return err
+	}
+	actual, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return err
+	}
+	rel, err := filepath.Rel(root, actual)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("el archivo no pertenece al contenido del perfil")
+	}
+	return nil
 }

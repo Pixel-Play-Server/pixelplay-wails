@@ -12,7 +12,6 @@ import (
 	"pixelplay-launcher/internal/auth"
 	"pixelplay-launcher/internal/config"
 	"pixelplay-launcher/internal/discordrpc"
-	"pixelplay-launcher/internal/featured"
 	"pixelplay-launcher/internal/filepick"
 	"pixelplay-launcher/internal/ipc"
 	"pixelplay-launcher/internal/notify"
@@ -69,8 +68,6 @@ func (a *App) Startup(ctx context.Context) {
 	a.ctx = ctx
 	_ = paths.EnsureLayout()
 	_ = profiles.EnsureStore()
-	// Fresh install: seed Pixel Play pack profile so Profiles isn't empty.
-	go func() { _, _ = featured.EnsureDefaultProfile() }()
 	// Auto-renew tokens for all accounts silently without asking anything
 	go auth.AutoRefreshAllAccountTokens()
 	// Per-machine maintenance actions (e.g. re-auth support key after an OS update).

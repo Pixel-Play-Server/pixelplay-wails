@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"pixelplay-launcher/internal/download"
+	"pixelplay-launcher/internal/horizon"
 	"pixelplay-launcher/internal/paths"
 	"pixelplay-launcher/internal/profiles"
 	"pixelplay-launcher/internal/protect"
@@ -77,6 +78,7 @@ func ListLocal(profileID, contentType string, calculateHashes bool) ([]Item, err
 	var meta struct {
 		Path           string `json:"path"`
 		HorizonRuntime bool   `json:"horizon_runtime"`
+		Loader         string `json:"loader"`
 	}
 	if err := json.Unmarshal(raw, &meta); err != nil {
 		return nil, err
@@ -89,7 +91,7 @@ func ListLocal(profileID, contentType string, calculateHashes bool) ([]Item, err
 
 	root := paths.ProfileDir(meta.Path)
 	sub := dirForType(contentType)
-	horizonMods := meta.HorizonRuntime && (strings.EqualFold(contentType, "Mod") || strings.EqualFold(contentType, "Mods"))
+	horizonMods := (meta.HorizonRuntime || strings.EqualFold(meta.Loader, "horizon")) && (strings.EqualFold(contentType, "Mod") || strings.EqualFold(contentType, "Mods"))
 	if horizonMods {
 		sub = "horizon-mods"
 	}
@@ -133,6 +135,13 @@ func ListLocal(profileID, contentType string, calculateHashes bool) ([]Item, err
 			IsDirectory: e.IsDir(),
 			ContentType: norm,
 		}
+		if horizonMods {
+			id := strings.TrimSuffix(displayName, ".hmod")
+			item.ID = id
+			item.AssociatedLoad = "horizon"
+			item.IsDisabled = disabled || !horizon.ModEnabled(root, id)
+		}
+
 		if calculateHashes && !e.IsDir() {
 			if h, herr := fileSHA1(full); herr == nil {
 				item.Sha1Hash = &h
@@ -181,6 +190,19 @@ func InstallFile(profileID, contentType, fileName, downloadURL string) (string, 
 }
 
 func SetEnabled(filePath string, enabled bool) error {
+	if filepath.Base(filepath.Dir(filePath)) == "horizon-mods" {
+		clean := strings.TrimSuffix(filepath.Base(filePath), ".disabled")
+		if !strings.HasSuffix(clean, ".hmod") {
+			return fmt.Errorf("archivo Horizon inválido")
+		}
+		if enabled && strings.HasSuffix(filePath, ".disabled") {
+			if err := os.Rename(filePath, strings.TrimSuffix(filePath, ".disabled")); err != nil {
+				return err
+			}
+		}
+		return horizon.SetModEnabled(filepath.Dir(filepath.Dir(filePath)), strings.TrimSuffix(clean, ".hmod"), enabled)
+	}
+
 	in := filepath.Clean(filePath)
 	parent := filepath.Dir(in)
 	base := filepath.Base(in)
@@ -220,6 +242,19 @@ func Delete(filePath string) error {
 }
 
 func CopyInto(destDir string, srcPaths []string) error {
+	if filepath.Base(destDir) == "horizon-mods" {
+		for _, src := range srcPaths {
+			id, err := horizon.InstallMod(filepath.Dir(destDir), src)
+			if err != nil {
+				return err
+			}
+			if err = horizon.SetModEnabled(filepath.Dir(destDir), id, true); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return err
 	}
@@ -310,10 +345,16 @@ func ProfileContentDir(profileID, contentType string) (string, error) {
 		return "", err
 	}
 	var meta struct {
-		Path string `json:"path"`
+		Path    string `json:"path"`
+		Horizon bool   `json:"horizon_runtime"`
+		Loader  string `json:"loader"`
 	}
 	if err := json.Unmarshal(raw, &meta); err != nil {
 		return "", err
 	}
-	return filepath.Join(paths.ProfileDir(meta.Path), dirForType(contentType)), nil
+	sub := dirForType(contentType)
+	if (meta.Horizon || meta.Loader == "horizon") && isModType(contentType) {
+		sub = "horizon-mods"
+	}
+	return filepath.Join(paths.ProfileDir(meta.Path), sub), nil
 }

@@ -106,38 +106,37 @@ func ReservePixel(username, password string) (accounts.Credentials, error) {
 }
 
 func requirePixelToken() (string, error) {
-	acc, err := accounts.Active()
-	if err != nil || acc == nil {
-		return "", fmt.Errorf("no hay una cuenta activa")
-	}
-	if !acc.PixelAccount() {
-		return "", fmt.Errorf("las amistades son solo para cuentas Pixel")
-	}
-	if refreshed, err := EnsurePixelplay(*acc); err == nil {
-		acc = &refreshed
-	}
-	tok := acc.PixelToken()
-	if tok == "" {
-		return "", fmt.Errorf("sesión Pixel vencida — vuelve a iniciar sesión")
-	}
-	return tok, nil
+	token, _, err := ActivePixelSession()
+	return token, err
 }
 
-func activeUsername() string {
-	acc, err := accounts.Active()
-	if err != nil || acc == nil {
-		return ""
-	}
-	return strings.TrimSpace(acc.Username)
-}
-
-// ActivePixelSession returns a fresh Pixel token and username for the active account.
+// ActivePixelSession reads token and identity from the same account snapshot.
 func ActivePixelSession() (token, username string, err error) {
-	tok, err := requirePixelToken()
+	acc, err := accounts.Active()
 	if err != nil {
 		return "", "", err
 	}
-	return tok, activeUsername(), nil
+	if acc == nil {
+		return "", "", fmt.Errorf("no hay una cuenta activa")
+	}
+	if !acc.PixelAccount() {
+		return "", "", fmt.Errorf("las amistades son solo para cuentas Pixel")
+	}
+	refreshed, err := EnsurePixelplay(*acc)
+	if err != nil {
+		return "", "", fmt.Errorf("no se pudo renovar la sesión Pixel: %w", err)
+	}
+	live, err := accounts.Active()
+	if err != nil {
+		return "", "", err
+	}
+	if live == nil || !sameAccountID(live.ID, refreshed.ID) {
+		return "", "", fmt.Errorf("la cuenta activa cambió; vuelve a intentarlo")
+	}
+	if refreshed.PixelToken() == "" {
+		return "", "", fmt.Errorf("sesión Pixel vencida — vuelve a iniciar sesión")
+	}
+	return refreshed.PixelToken(), strings.TrimSpace(refreshed.Username), nil
 }
 
 func RefreshPixelProfile() (map[string]any, error) {

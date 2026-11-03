@@ -29,11 +29,14 @@ type RegistryVersion struct {
 	File    RegistryFile `json:"file"`
 }
 type RegistryProject struct {
-	ID       string            `json:"id"`
-	Kind     string            `json:"kind"`
-	Name     string            `json:"name"`
-	Summary  string            `json:"summary"`
-	Versions []RegistryVersion `json:"versions"`
+	ID        string            `json:"id"`
+	Kind      string            `json:"kind"`
+	Name      string            `json:"name"`
+	Summary   string            `json:"summary"`
+	Icon      string            `json:"icon"`
+	Authors   []string          `json:"authors"`
+	Downloads uint64            `json:"downloads"`
+	Versions  []RegistryVersion `json:"versions"`
 }
 type registryIndex struct {
 	Schema   int               `json:"schema"`
@@ -76,11 +79,11 @@ func RegistryMods(ctx context.Context) ([]RegistryProject, error) {
 	}
 	mods := []RegistryProject{}
 	for _, p := range idx.Projects {
-		if p.Kind != "mod" || len(p.Versions) == 0 {
+		if len(p.Versions) == 0 {
 			continue
 		}
 		v := p.Versions[0]
-		if v.Game != "26.3" || !strings.HasSuffix(v.File.Name, ".hmod") {
+		if !registryCompatible(p.Kind, v) {
 			continue
 		}
 		revoked := false
@@ -96,23 +99,33 @@ func RegistryMods(ctx context.Context) ([]RegistryProject, error) {
 	return mods, nil
 }
 func InstallRegistryMod(ctx context.Context, gameDir, id string) (string, error) {
+	return InstallRegistryContent(ctx, gameDir, id, "")
+}
+
+func InstallRegistryContent(ctx context.Context, gameDir, id, versionID string) (string, error) {
 	idx, err := fetchRegistry(ctx)
 	if err != nil {
 		return "", err
 	}
 	for _, p := range idx.Projects {
-		if p.ID != id || p.Kind != "mod" || len(p.Versions) == 0 {
+		if p.ID != id || len(p.Versions) == 0 {
 			continue
 		}
 		v := p.Versions[0]
 		f := v.File
-		if v.Game != "26.3" || !strings.HasSuffix(f.Name, ".hmod") || f.Size <= 0 || f.Size > 48<<20 || len(f.SHA256) != 64 {
+		if versionID != "" && versionID != id+"@"+v.Version {
+			return "", fmt.Errorf("la versión del catálogo cambió; actualiza la lista")
+		}
+		if !safeModID.MatchString(id) || !registryCompatible(p.Kind, v) || f.Size <= 0 || f.Size > 64<<20 || len(f.SHA256) != 64 {
 			return "", fmt.Errorf("mod no compatible con Horizon 26.3")
 		}
 		for _, r := range idx.Revoked {
 			if r.ID == id && (r.SHA256 == "" || r.SHA256 == f.SHA256) {
 				return "", fmt.Errorf("mod revocado")
 			}
+		}
+		if p.Kind == "native-mod" {
+			return "", fmt.Errorf("%s requiere compilar Horizon con sus mixins nativos (.hnmod). Abre playhorizon.dev/mods/%s para consultar el proyecto; el compilador nativo aún no está integrado en Pixel Play", p.Name, id)
 		}
 		u, e := url.Parse(f.URL)
 		if e != nil || u.Scheme != "https" || u.User != nil || u.Hostname() != "github.com" || !strings.Contains(u.Path, "/releases/download/") {
@@ -130,7 +143,7 @@ func InstallRegistryMod(ctx context.Context, gameDir, id string) (string, error)
 		if res.StatusCode != 200 {
 			return "", fmt.Errorf("descarga de mod HTTP %d", res.StatusCode)
 		}
-		tmp, e := os.CreateTemp("", "pixelplay-registry-*.hmod")
+		tmp, e := os.CreateTemp("", "pixelplay-registry-*"+filepath.Ext(f.Name))
 		if e != nil {
 			return "", e
 		}
@@ -147,7 +160,39 @@ func InstallRegistryMod(ctx context.Context, gameDir, id string) (string, error)
 		if n != f.Size || hex.EncodeToString(h.Sum(nil)) != f.SHA256 {
 			return "", fmt.Errorf("SHA-256 o tamaño del mod incorrecto")
 		}
-		return InstallMod(filepath.Clean(gameDir), tmp.Name())
+		switch p.Kind {
+		case "native-mod":
+			return "", fmt.Errorf("%s requiere compilar Horizon con sus mixins nativos (.hnmod). Pixel Play todavía no incorpora ese compilador; no se ha instalado ni activado el mod", p.Name)
+		case "resourcepack":
+			return installRegistryPack(gameDir, tmp.Name(), id, v.Version)
+		default:
+			return InstallMod(filepath.Clean(gameDir), tmp.Name())
+		}
 	}
 	return "", fmt.Errorf("mod no encontrado en Horizon Registry")
+}
+
+func registryCompatible(kind string, v RegistryVersion) bool {
+	if v.Game != "26.3" {
+		return false
+	}
+	switch kind {
+	case "mod":
+		return strings.HasSuffix(v.File.Name, ".hmod")
+	case "native-mod":
+		return strings.HasSuffix(v.File.Name, ".hnmod")
+	case "resourcepack":
+		return strings.HasSuffix(v.File.Name, ".zip")
+	}
+	return false
+}
+
+func InstalledFilename(p RegistryProject, v RegistryVersion) string {
+	if p.Kind == "resourcepack" {
+		return p.ID + "-" + v.Version + ".zip"
+	}
+	if p.Kind == "native-mod" {
+		return p.ID + ".hnmod"
+	}
+	return p.ID + ".hmod"
 }

@@ -450,18 +450,11 @@ func pixelOrLocalProfile(compact, name string) json.RawMessage {
 		if remotePNGExists(candidate) {
 			skinURL = candidate
 		}
-		capeCandidate := pixelAPIBase + "/player/" + id + "/cape.png"
-		if remotePNGExists(capeCandidate) {
-			capeURL = capeCandidate
-		}
 	}
 	if skinURL == "" && name != "" && name != "Player" {
 		csl := pixelCSLProfile(name)
 		if csl.skinURL != "" {
 			skinURL = csl.skinURL
-			if capeURL == "" {
-				capeURL = csl.capeURL
-			}
 			if csl.name != "" {
 				name = csl.name
 			}

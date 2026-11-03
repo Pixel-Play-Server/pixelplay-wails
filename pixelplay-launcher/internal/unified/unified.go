@@ -118,6 +118,9 @@ func Search(raw json.RawMessage) (SearchResponse, error) {
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return SearchResponse{}, fmt.Errorf("params de búsqueda: %w", err)
 	}
+	if strings.EqualFold(p.Source, "Horizon") {
+		return horizonSearch(p)
+	}
 	limit := 20
 	offset := 0
 	if p.Limit != nil && *p.Limit > 0 {
@@ -214,6 +217,9 @@ func Versions(raw json.RawMessage) (VersionResponse, error) {
 	var p VersionsParams
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return VersionResponse{}, fmt.Errorf("params de versiones: %w", err)
+	}
+	if strings.EqualFold(p.Source, "Horizon") {
+		return horizonVersions(p)
 	}
 	if strings.TrimSpace(p.ProjectID) == "" {
 		return VersionResponse{}, fmt.Errorf("falta project_id")
