@@ -77,6 +77,19 @@ func Dispatch(rt *Runtime, cmd string, argsJSON string) (any, error) {
 	switch cmd {
 	case "list_profiles":
 		return profiles.RawList()
+	case "get_horizon_runtime_status":
+		pid, err := argString(args, "profile_id", "profileId")
+		if err != nil {
+			return nil, err
+		}
+		dir, err := content.ProfileContentDir(pid, "Mod")
+		if err != nil {
+			return nil, err
+		}
+		if filepath.Base(dir) != "horizon-mods" {
+			return nil, fmt.Errorf("este perfil no usa Horizon")
+		}
+		return horizon.Status(filepath.Dir(dir)), nil
 	case "get_profile":
 		id, err := argString(args, "id")
 		if err != nil {

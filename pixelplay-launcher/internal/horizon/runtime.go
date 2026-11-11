@@ -18,7 +18,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strings"
 	"time"
 
@@ -44,81 +43,6 @@ func at(root string) Runtime {
 func file(path string) bool { s, e := os.Stat(path); return e == nil && s.Mode().IsRegular() }
 func ready(r Runtime) bool {
 	return file(r.Binary) && file(filepath.Join(r.Resources, "horizon-resources.json"))
-}
-
-// Find preserves prepared installations made by the earlier bridge. It never reads accounts.
-func Find(gameDir string) (Runtime, bool) {
-	var roots []string
-	for _, parent := range []string{filepath.Join(gameDir, ".horizon-native"), filepath.Join(gameDir, ".horizon-launcher", "versions")} {
-		entries, _ := os.ReadDir(parent)
-		for _, e := range entries {
-			if e.IsDir() {
-				roots = append(roots, filepath.Join(parent, e.Name()))
-			}
-		}
-	}
-	sort.Slice(roots, func(i, j int) bool {
-		a, _ := os.Stat(roots[i])
-		b, _ := os.Stat(roots[j])
-		return a.ModTime().After(b.ModTime())
-	})
-	for _, root := range roots {
-		r := at(root)
-		if ready(r) {
-			return r, true
-		}
-	}
-	return Runtime{}, false
-}
-
-func Ensure(ctx context.Context, gameDir string, emit func(string)) (Runtime, error) {
-	asset, digest, err := releaseAsset(runtime.GOOS, runtime.GOARCH)
-	if err != nil {
-		return Runtime{}, err
-	}
-	if r, ok := Find(gameDir); ok {
-		return r, nil
-	}
-	r := at(filepath.Join(gameDir, ".horizon-native", Version))
-	if !file(r.Binary) {
-		emit("Descargando motor Horizon " + Version + "…")
-		parent := filepath.Dir(r.Root)
-		if err := os.MkdirAll(parent, 0700); err != nil {
-			return r, err
-		}
-		archive := filepath.Join(parent, asset)
-		if err := fetch(ctx, "https://github.com/horizon-rust/horizon/releases/download/"+Version+"/"+asset, archive, digest, false); err != nil {
-			return r, err
-		}
-		stage, err := os.MkdirTemp(parent, ".install-")
-		if err != nil {
-			return r, err
-		}
-		defer os.RemoveAll(stage)
-		if err = extract(archive, stage); err != nil {
-			return r, err
-		}
-		payload := stage
-		if !file(filepath.Join(payload, exe("horizon-client"))) {
-			folder := strings.TrimSuffix(strings.TrimSuffix(asset, ".tar.gz"), ".zip")
-			payload = filepath.Join(stage, folder)
-		}
-		if !file(filepath.Join(payload, exe("horizon-client"))) {
-			return r, fmt.Errorf("paquete Horizon sin ejecutable")
-		}
-		if err = os.Rename(payload, r.Root); err != nil {
-			return r, err
-		}
-		_ = os.Remove(archive)
-	}
-	emit("Preparando recursos de Minecraft " + Minecraft + " para Horizon…")
-	if err := prepare(ctx, r, gameDir, emit); err != nil {
-		return r, err
-	}
-	if !ready(r) {
-		return r, fmt.Errorf("Horizon no generó su manifiesto de recursos")
-	}
-	return r, nil
 }
 
 func prepare(ctx context.Context, r Runtime, gameDir string, emit func(string)) error {
@@ -246,7 +170,7 @@ func fetch(ctx context.Context, url, dest, digest string, shaOne bool) error {
 func safePath(root, name string) (string, error) {
 	name = strings.ReplaceAll(name, "\\", "/")
 	clean := filepath.Clean(filepath.FromSlash(name))
-	if strings.Contains(name, ":") || filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+	if strings.HasPrefix(name, "/") || strings.Contains(name, ":") || filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("ruta de archivo no permitida: %q", name)
 	}
 	return filepath.Join(root, clean), nil
@@ -339,7 +263,7 @@ func extract(archive, root string) error {
 }
 
 func SupportedPlatform() bool {
-	_, _, err := releaseAsset(runtime.GOOS, runtime.GOARCH)
+	_, err := assetName(runtime.GOOS, runtime.GOARCH)
 	return err == nil
 }
 func releaseAsset(osName, arch string) (string, string, error) {

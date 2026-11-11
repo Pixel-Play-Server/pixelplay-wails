@@ -31,7 +31,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: Pixel-Play-Server/pixelplaylauncher
-          ref: v7.0.0
+          ref: 6f7b6ee
           path: _ui
       - uses: actions/setup-go@v5
         with:
@@ -61,20 +61,22 @@ jobs:
           APP=build/bin/pixelplay-launcher.app
           test -f "$APP/Contents/MacOS/pixelplay-launcher"
           "$APP/Contents/MacOS/pixelplay-launcher" --version | tee /tmp/pixel-version
-          grep -Fx '7.0.1' /tmp/pixel-version
+          grep -Fx '7.0.2' /tmp/pixel-version
           codesign --force --deep --sign - "$APP"
           codesign --verify --deep --strict "$APP"
           mkdir -p ../dist
-          ditto -c -k --keepParent "$APP" '../dist/PixelPlay-7.0.1-${{ matrix.artifact }}.zip'
+          ditto -c -k --keepParent "$APP" '../dist/PixelPlay-7.0.2-${{ matrix.artifact }}.zip'
       - name: Build and smoke test Windows
         if: runner.os == 'Windows'
         working-directory: pixelplay-launcher
         run: |
           export PATH="/c/mingw64/bin:/c/Program Files (x86)/NSIS:$PATH"
           gcc --version
+          mkdir -p build/windows/installer/tmp
+          curl --fail --location --retry 3 https://aka.ms/vs/17/release/vc_redist.x64.exe -o build/windows/installer/tmp/vc_redist.x64.exe
           wails build -platform windows/amd64 -s -skipbindings -webview2 embed -nsis -installscope user
           ./build/bin/pixelplay-launcher.exe --version > startup-version.txt
-          grep -Fx '7.0.1' startup-version.txt
+          grep -Fx '7.0.2' startup-version.txt
           mkdir -p ../dist
           cp build/bin/*.exe ../dist/
       - uses: actions/upload-artifact@v4

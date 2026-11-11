@@ -221,6 +221,9 @@ func versionOf(bin string) (int, error) {
 
 func downloadTemurin(major int) error {
 	osName := runtime.GOOS
+	if osName == "darwin" {
+		osName = "mac"
+	}
 	arch := "x64"
 	if runtime.GOARCH == "arm64" {
 		arch = "aarch64"
