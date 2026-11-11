@@ -2,6 +2,7 @@ package launch
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -20,7 +21,7 @@ func nativeFixture(t *testing.T) (profileJSON, horizon.Runtime) {
 	t.Setenv("HOME", home)
 	t.Setenv("PIXELPLAY_DATA_DIR", filepath.Join(home, "data"))
 	p := profileJSON{ID: "native-test", Name: "Horizon", Path: "Horizon-Test"}
-	root := filepath.Join(home, "data/profiles", p.Path, ".horizon-native/test")
+	root := filepath.Join(home, "data/profiles", p.Path, ".horizon-native/"+horizon.Version)
 	r := horizon.Runtime{Root: root, Binary: filepath.Join(root, "horizon-client"), Resources: filepath.Join(root, ".local/horizon-client/26.3")}
 	if err := os.MkdirAll(r.Resources, 0700); err != nil {
 		t.Fatal(err)
@@ -29,6 +30,10 @@ func nativeFixture(t *testing.T) (profileJSON, horizon.Runtime) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(r.Binary, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\"\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	state, _ := json.Marshal(map[string]any{"active": horizon.Version, "checked_at": time.Now().UTC(), "version": horizon.Version})
+	if err := os.WriteFile(filepath.Join(filepath.Dir(root), "update.json"), state, 0600); err != nil {
 		t.Fatal(err)
 	}
 	return p, r
